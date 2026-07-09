@@ -1,0 +1,33 @@
+# Cursor IDE
+.cursor/
+.cursorindexingignore
+.specstory/
+
+# Environment & secrets (never commit)
+.env
+.env.*
+.env.local
+*.env
+!.env.example
+!env.example
+
+# Hardhat / deploy local output
+deploy-contracts/artifacts/
+deploy-contracts/cache/
+deploy-contracts/.env
+deploy-contracts/deployed-*.json
+deploy-contracts/runlog.txt
+
+# Backend runtime / local state
+eclaim-backend/claim-meta.json
+eclaim-backend/.env
+
+# Frontend local env
+eclaim-frontend/.env.local
+
+# Temp / scratch
+.tmp-*
+*.tmp.json
+
+# OS
+.DS_Store

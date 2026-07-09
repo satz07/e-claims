@@ -1,0 +1,775 @@
+[
+  {
+    "refCode": "CAM-2026-001",
+    "title": "Clean Water Initiative - Southeast Asia",
+    "logoUrl": "https://example.com/logos/water.png",
+    "globalTotal": 1000000,
+    "globalMin": 10000,
+    "globalMax": 50000,
+    "currency": "USD",
+    "beneficiaries": 50000,
+    "targetOutcome": "Provide sustainable clean water sources to 100 villages.",
+    "startDate": "2026-01-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Health",
+    "partner": "Global Water Works",
+    "summary": "Expanding clean water access through community-led infrastructure.",
+    "fullDescription": "This campaign focuses on building solar-powered wells and water filtration systems in underserved rural communities across Vietnam and Cambodia.",
+    "grantOverview": [
+      {
+        "title": "Funding Focus",
+        "desc": "Infrastructure and community training for sustainable water management."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Technical",
+        "desc": "Soundness of the engineering plan."
+      },
+      {
+        "title": "Impact",
+        "desc": "Number of direct beneficiaries per dollar spent."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Experience",
+        "desc": "Minimum 5 years in water sector."
+      },
+      {
+        "title": "Compliance",
+        "desc": "Valid non-profit registration and audited financials."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Applications Open",
+        "timeline": [
+          { "date": "2026-01-15", "state": "Cycle Starts" },
+          { "date": "2026-03-31", "state": "Applications Close" }
+        ],
+        "orgsToFund": 20,
+        "minAmount": 10000,
+        "maxAmount": 25000,
+        "totalAmount": 400000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-002",
+    "title": "Digital Literacy for Rural Youth",
+    "logoUrl": null,
+    "globalTotal": 500000,
+    "globalMin": 5000,
+    "globalMax": 20000,
+    "currency": "USD",
+    "beneficiaries": 10000,
+    "targetOutcome": "Equip 50 rural schools with computer labs and trained instructors.",
+    "startDate": "2026-06-01",
+    "endDate": "2026-12-31",
+    "status": "DRAFT",
+    "priority": "MEDIUM",
+    "sector": "Education",
+    "partner": "EduTech Foundation",
+    "summary": "Bridging the digital divide for the next generation.",
+    "fullDescription": "A comprehensive program to provide hardware, software, and curriculum training to teachers in remote mountainous regions.",
+    "grantOverview": [
+      {
+        "title": "Scope",
+        "desc": "Hardware provision and teacher training."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Innovation",
+        "desc": "Creative use of technology in remote areas."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Registration",
+        "desc": "Must be a registered educational charity."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Planning",
+        "timeline": [
+          { "date": "2026-06-01", "state": "Planning Starts" },
+          { "date": "2026-06-30", "state": "Planning Ends" }
+        ],
+        "orgsToFund": 10,
+        "minAmount": 5000,
+        "maxAmount": 20000,
+        "totalAmount": 150000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-003",
+    "title": "Empowering Women in Tech - Nigeria",
+    "logoUrl": "https://example.com/logos/women_tech.png",
+    "globalTotal": 750000,
+    "globalMin": 15000,
+    "globalMax": 40000,
+    "currency": "USD",
+    "beneficiaries": 5000,
+    "targetOutcome": "Train 5000 women in software development and provide job placement support.",
+    "startDate": "2026-03-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Social",
+    "partner": "Lagos Tech Hub",
+    "summary": "Bridging the gender gap in the Nigerian technology ecosystem.",
+    "fullDescription": "An intensive bootcamp followed by a 6-month mentorship program aimed at placing women in high-growth tech roles.",
+    "grantOverview": [
+      {
+        "title": "Bootcamp Support",
+        "desc": "Funding covers instructor fees and venue costs."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Placement Rate",
+        "desc": "Percentage of graduates securing roles within 3 months."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Capacity",
+        "desc": "Ability to host 50+ students per batch."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Recruitment",
+        "timeline": [
+          { "date": "2026-03-01", "state": "Recruitment Starts" },
+          { "date": "2026-04-30", "state": "Recruitment Ends" }
+        ],
+        "orgsToFund": 5,
+        "minAmount": 15000,
+        "maxAmount": 40000,
+        "totalAmount": 200000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-004",
+    "title": "Amazon Reforestation Project",
+    "logoUrl": "https://example.com/logos/forest.png",
+    "globalTotal": 1200000,
+    "globalMin": 20000,
+    "globalMax": 100000,
+    "currency": "USD",
+    "beneficiaries": 150000,
+    "targetOutcome": "Plant 1 million native trees and protect 5000 hectares of rainforest.",
+    "startDate": "2026-05-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Environment",
+    "partner": "Green Planet NGO",
+    "summary": "Restoring the lungs of the earth through local community partnerships.",
+    "fullDescription": "This project focuses on reforestation in degraded areas of the Amazon basin, using native species and providing income for local indigenous communities.",
+    "grantOverview": [
+      {
+        "title": "Planting Subsidy",
+        "desc": "Funding for nursery establishment and seedling distribution."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Survival Rate",
+        "desc": "Minimum 80% survival rate of planted trees after 1 year."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Land Tenure",
+        "desc": "Proven legal right to use the land for reforestation."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Nursery Preparation",
+        "timeline": [
+          { "date": "2026-05-01", "state": "Nursery Starts" },
+          { "date": "2026-08-31", "state": "Nursery Ends" }
+        ],
+        "orgsToFund": 10,
+        "minAmount": 20000,
+        "maxAmount": 50000,
+        "totalAmount": 400000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-005",
+    "title": "Mobile Clinics for Remote Areas",
+    "logoUrl": "https://example.com/logos/clinic.png",
+    "globalTotal": 2000000,
+    "globalMin": 50000,
+    "globalMax": 150000,
+    "currency": "USD",
+    "beneficiaries": 100000,
+    "targetOutcome": "Deploy 20 mobile clinics to provide basic healthcare in remote regions of East Africa.",
+    "startDate": "2026-04-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Health",
+    "partner": "Doctors Without Borders (Partner)",
+    "summary": "Bringing medical care to the doorstep of those who need it most.",
+    "fullDescription": "Equipping vans with medical supplies and staffing them with doctors and nurses to provide maternal care, vaccinations, and basic treatment.",
+    "grantOverview": [
+      {
+        "title": "Vehicle Fleet",
+        "desc": "Funding for purchase and customization of mobile units."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Patient Reach",
+        "desc": "Average number of patients treated per week per unit."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Medical License",
+        "desc": "Valid license to provide medical services in target country."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Unit Procurement",
+        "timeline": [
+          { "date": "2026-04-01", "state": "Procurement Starts" },
+          { "date": "2026-06-30", "state": "Procurement Ends" }
+        ],
+        "orgsToFund": 4,
+        "minAmount": 50000,
+        "maxAmount": 150000,
+        "totalAmount": 500000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-006",
+    "title": "Solar Power for Schools",
+    "logoUrl": "https://example.com/logos/solar.png",
+    "globalTotal": 800000,
+    "globalMin": 10000,
+    "globalMax": 30000,
+    "currency": "USD",
+    "beneficiaries": 25000,
+    "targetOutcome": "Install solar panel systems in 100 rural schools to provide consistent electricity.",
+    "startDate": "2026-07-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "MEDIUM",
+    "sector": "Environment",
+    "partner": "Clean Energy Fund",
+    "summary": "Powering education with clean, sustainable energy.",
+    "fullDescription": "Providing schools with solar panels, batteries, and lighting to allow for evening classes and computer use.",
+    "grantOverview": [
+      {
+        "title": "Equipment Grant",
+        "desc": "Funding covers solar panels, inverters, and battery storage."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Energy Yield",
+        "desc": "Expected kilowatt-hours generated per year."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Technical Team",
+        "desc": "Must have certified solar technicians on staff."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Site Assessment",
+        "timeline": [
+          { "date": "2026-07-01", "state": "Assessment Starts" },
+          { "date": "2026-09-30", "state": "Assessment Ends" }
+        ],
+        "orgsToFund": 8,
+        "minAmount": 10000,
+        "maxAmount": 30000,
+        "totalAmount": 200000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-007",
+    "title": "Refugee Resettlement Support",
+    "logoUrl": "https://example.com/logos/refugee.png",
+    "globalTotal": 1500000,
+    "globalMin": 25000,
+    "globalMax": 75000,
+    "currency": "USD",
+    "beneficiaries": 12000,
+    "targetOutcome": "Provide housing and language training for 12,000 refugees arriving in Europe.",
+    "startDate": "2026-02-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Social",
+    "partner": "International Rescue Committee (Partner)",
+    "summary": "Helping families rebuild their lives in a new home.",
+    "fullDescription": "Offering a range of services including legal aid, temporary housing, and intensive language and vocational courses.",
+    "grantOverview": [
+      {
+        "title": "Service Bundle",
+        "desc": "Funding covers housing stipends and instructor salaries."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Language Proficiency",
+        "desc": "Number of participants passing A2 level language tests."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Legal Status",
+        "desc": "Must be an authorized resettlement agency."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Arrival Support",
+        "timeline": [
+          { "date": "2026-02-01", "state": "Support Starts" },
+          { "date": "2026-05-31", "state": "Support Ends" }
+        ],
+        "orgsToFund": 6,
+        "minAmount": 25000,
+        "maxAmount": 75000,
+        "totalAmount": 400000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-008",
+    "title": "STEM Excellence for Girls",
+    "logoUrl": "https://example.com/logos/stem.png",
+    "globalTotal": 900000,
+    "globalMin": 10000,
+    "globalMax": 45000,
+    "currency": "USD",
+    "beneficiaries": 8000,
+    "targetOutcome": "Provide 8,000 girls with advanced STEM workshops and scholarships.",
+    "startDate": "2026-09-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "MEDIUM",
+    "sector": "Education",
+    "partner": "Global STEM Initiative",
+    "summary": "Fostering the next generation of female scientists and engineers.",
+    "fullDescription": "Hands-on workshops in coding, robotics, and biology for middle and high school girls in developing countries.",
+    "grantOverview": [
+      {
+        "title": "Scholarship Fund",
+        "desc": "Grants to cover tuition and lab supplies for top performers."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Grade Improvement",
+        "desc": "Average increase in STEM subjects' grades among participants."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Curriculum",
+        "desc": "Must provide a sample syllabus for STEM workshops."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Application Review",
+        "timeline": [
+          { "date": "2026-09-01", "state": "Review Starts" },
+          { "date": "2026-10-31", "state": "Review Ends" }
+        ],
+        "orgsToFund": 12,
+        "minAmount": 10000,
+        "maxAmount": 35000,
+        "totalAmount": 300000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-009",
+    "title": "Ocean Plastic Recovery",
+    "logoUrl": "https://example.com/logos/ocean.png",
+    "globalTotal": 1800000,
+    "globalMin": 30000,
+    "globalMax": 120000,
+    "currency": "USD",
+    "beneficiaries": 200000,
+    "targetOutcome": "Remove 5,000 tons of plastic from major river mouths and coastal areas.",
+    "startDate": "2026-06-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Environment",
+    "partner": "Ocean Conservancy",
+    "summary": "Protecting marine life by stopping plastic at the source.",
+    "fullDescription": "Deploying innovative interceptors and organizing community cleanup drives to prevent plastic from entering the oceans.",
+    "grantOverview": [
+      {
+        "title": "Technology Grant",
+        "desc": "Funding for river interceptors and waste management infrastructure."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Tonnage Removed",
+        "desc": "Total weight of plastic waste recovered and recycled."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Operations",
+        "desc": "Must have existing coastal operations in high-risk zones."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Deployment Phase 1",
+        "timeline": [
+          { "date": "2026-06-01", "state": "Deployment Starts" },
+          { "date": "2026-08-31", "state": "Deployment Ends" }
+        ],
+        "orgsToFund": 7,
+        "minAmount": 30000,
+        "maxAmount": 80000,
+        "totalAmount": 500000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-010",
+    "title": "Mental Health Support for All",
+    "logoUrl": "https://example.com/logos/mental_health.png",
+    "globalTotal": 600000,
+    "globalMin": 5000,
+    "globalMax": 20000,
+    "currency": "USD",
+    "beneficiaries": 30000,
+    "targetOutcome": "Provide 30,000 counseling sessions and awareness workshops globally.",
+    "startDate": "2026-10-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "MEDIUM",
+    "sector": "Health",
+    "partner": "Global Mental Health Alliance",
+    "summary": "Reducing stigma and providing access to mental health resources.",
+    "fullDescription": "A multi-faceted approach including a 24/7 helpline, online therapy sessions, and community-led awareness campaigns.",
+    "grantOverview": [
+      {
+        "title": "Counseling Support",
+        "desc": "Funding for licensed therapists and helpline operators."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Well-being Index",
+        "desc": "Average improvement in participant self-reported well-being scores."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Credentials",
+        "desc": "All counselors must hold valid professional certifications."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Helpline Setup",
+        "timeline": [
+          { "date": "2026-10-01", "state": "Setup Starts" },
+          { "date": "2026-12-31", "state": "Setup Ends" }
+        ],
+        "orgsToFund": 15,
+        "minAmount": 5000,
+        "maxAmount": 15000,
+        "totalAmount": 200000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-011",
+    "title": "Sustainable Farming Future",
+    "logoUrl": "https://example.com/logos/farming.png",
+    "globalTotal": 1100000,
+    "globalMin": 15000,
+    "globalMax": 60000,
+    "currency": "USD",
+    "beneficiaries": 15000,
+    "targetOutcome": "Transition 15,000 smallholder farmers to regenerative agriculture practices.",
+    "startDate": "2026-05-15",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "MEDIUM",
+    "sector": "Environment",
+    "partner": "AgriTech Solutions",
+    "summary": "Boosting yields while protecting the soil.",
+    "fullDescription": "Providing farmers with organic seeds, bio-fertilizers, and training in soil conservation and water-efficient irrigation.",
+    "grantOverview": [
+      {
+        "title": "Input Subsidy",
+        "desc": "Funding for organic inputs and solar irrigation kits."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Soil Health",
+        "desc": "Measured increase in soil organic matter over one year."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Farmer Base",
+        "desc": "Must have an existing network of at least 500 farmers."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Training & Distribution",
+        "timeline": [
+          { "date": "2026-05-15", "state": "Training Starts" },
+          { "date": "2026-07-31", "state": "Training Ends" }
+        ],
+        "orgsToFund": 9,
+        "minAmount": 15000,
+        "maxAmount": 40000,
+        "totalAmount": 350000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-012",
+    "title": "Youth Startup Fund",
+    "logoUrl": "https://example.com/logos/startup.png",
+    "globalTotal": 950000,
+    "globalMin": 10000,
+    "globalMax": 50000,
+    "currency": "USD",
+    "beneficiaries": 2000,
+    "targetOutcome": "Provide seed funding and mentorship to 2,000 young entrepreneurs in emerging markets.",
+    "startDate": "2026-08-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "MEDIUM",
+    "sector": "Social",
+    "partner": "Global Entrepreneur Network",
+    "summary": "Empowering young leaders to build the businesses of tomorrow.",
+    "fullDescription": "A pitch competition followed by a structured incubation program and seed grants for the most promising social enterprises.",
+    "grantOverview": [
+      {
+        "title": "Seed Capital",
+        "desc": "Direct equity-free grants for prototype development."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Business Viability",
+        "desc": "Strength of the business model and financial projections."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Age Limit",
+        "desc": "Founders must be between 18 and 30 years old."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Incubation",
+        "timeline": [
+          { "date": "2026-08-01", "state": "Incubation Starts" },
+          { "date": "2026-11-30", "state": "Incubation Ends" }
+        ],
+        "orgsToFund": 20,
+        "minAmount": 10000,
+        "maxAmount": 25000,
+        "totalAmount": 400000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-013",
+    "title": "Powering Rural Health",
+    "logoUrl": "https://example.com/logos/health_power.png",
+    "globalTotal": 1300000,
+    "globalMin": 25000,
+    "globalMax": 80000,
+    "currency": "USD",
+    "beneficiaries": 50000,
+    "targetOutcome": "Provide reliable solar power and refrigeration to 150 rural health clinics.",
+    "startDate": "2026-05-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Health",
+    "partner": "Sustainable Energy for All",
+    "summary": "Ensuring cold chains for vaccines and light for emergency surgeries.",
+    "fullDescription": "Electrifying clinics that currently lack consistent power, focusing on vaccine storage and maternity ward lighting.",
+    "grantOverview": [
+      {
+        "title": "Solar Hardware",
+        "desc": "Funding for solar kits and energy-efficient refrigerators."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Uptime",
+        "desc": "System availability measured over a 6-month period."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Facility Need",
+        "desc": "Clinic must be at least 20km from the nearest power grid."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Installation",
+        "timeline": [
+          { "date": "2026-05-01", "state": "Installation Starts" },
+          { "date": "2026-09-30", "state": "Installation Ends" }
+        ],
+        "orgsToFund": 5,
+        "minAmount": 25000,
+        "maxAmount": 60000,
+        "totalAmount": 250000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-014",
+    "title": "Empowering Adults Through Literacy",
+    "logoUrl": "https://example.com/logos/literacy.png",
+    "globalTotal": 400000,
+    "globalMin": 5000,
+    "globalMax": 15000,
+    "currency": "USD",
+    "beneficiaries": 15000,
+    "targetOutcome": "Provide 15,000 illiterate adults with basic reading, writing, and numeracy skills.",
+    "startDate": "2026-11-01",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "LOW",
+    "sector": "Education",
+    "partner": "Global Literacy Mission",
+    "summary": "Opening doors to new opportunities through the power of literacy.",
+    "fullDescription": "Community-based literacy classes tailored for adults, combined with basic financial literacy training.",
+    "grantOverview": [
+      {
+        "title": "Material Support",
+        "desc": "Funding for textbooks, workbooks, and classroom supplies."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Literacy Level",
+        "desc": "Number of participants achieving basic proficiency in reading and writing."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Location",
+        "desc": "Must operate in areas with literacy rates below the national average."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Class Formation",
+        "timeline": [
+          { "date": "2026-11-01", "state": "Formation Starts" },
+          { "date": "2026-12-31", "state": "Formation Ends" }
+        ],
+        "orgsToFund": 10,
+        "minAmount": 5000,
+        "maxAmount": 10000,
+        "totalAmount": 100000
+      }
+    ]
+  },
+  {
+    "refCode": "CAM-2026-015",
+    "title": "Disaster Resilient Communities",
+    "logoUrl": "https://example.com/logos/resilience.png",
+    "globalTotal": 1750000,
+    "globalMin": 40000,
+    "globalMax": 150000,
+    "currency": "USD",
+    "beneficiaries": 30000,
+    "targetOutcome": "Build 500 disaster-resilient homes and train communities in disaster preparedness.",
+    "startDate": "2026-06-15",
+    "endDate": "2026-12-31",
+    "status": "APPROVED",
+    "priority": "HIGH",
+    "sector": "Social",
+    "partner": "Habitat for Humanity (Partner)",
+    "summary": "Building stronger homes for a safer future.",
+    "fullDescription": "Constructing homes using earthquake and flood-resistant techniques in high-risk areas, while training local builders.",
+    "grantOverview": [
+      {
+        "title": "Construction Fund",
+        "desc": "Funding for materials and skilled labor for resilient housing."
+      }
+    ],
+    "evalCriteria": [
+      {
+        "title": "Resilience Rating",
+        "desc": "Independent assessment of the home's ability to withstand target disasters."
+      }
+    ],
+    "selCriteria": [
+      {
+        "title": "Expertise",
+        "desc": "Must have architects and engineers with disaster-resilient design experience."
+      }
+    ],
+    "cycles": [
+      {
+        "cycleNumber": 1,
+        "state": "Site Preparation",
+        "timeline": [
+          { "date": "2026-06-15", "state": "Site Prep Starts" },
+          { "date": "2026-08-31", "state": "Site Prep Ends" }
+        ],
+        "orgsToFund": 4,
+        "minAmount": 40000,
+        "maxAmount": 100000,
+        "totalAmount": 400000
+      }
+    ]
+  }
+]

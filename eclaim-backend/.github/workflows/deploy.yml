@@ -1,0 +1,62 @@
+name: DDSC-Service
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  local-ci-cd:
+    runs-on: [self-hosted, ddsc]
+
+    steps:
+      # 1️⃣ Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Set image name and tag
+      - name: Set Docker Image Tag
+        run: |
+          TIMESTAMP=$(date +"%Y-%m-%d-%H-%M")
+          echo "IMAGE_TAG=node-app-uat-${TIMESTAMP}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=node-app-local" >> $GITHUB_ENV
+
+      # 3️⃣ Build Docker image
+      - name: Build Docker Image
+        run: |
+          sudo docker build -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+
+      # 4️⃣ Stop old container if exists
+      - name: Stop Existing Container
+        run: |
+          sudo docker stop node-app || true
+          sudo docker rm node-app || true
+
+      # 5️⃣ Run container using server env file
+      - name: Run Container with server env
+        run: |
+
+          ENV_FILE="/home/azureuser/sec-key/uat.env"
+
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "❌ ENV file not found: $ENV_FILE"
+            exit 1
+          fi
+
+          # Extract APP_PORT from env file
+          CONTAINER_PORT=$(grep -E '^APP_PORT=' $ENV_FILE | cut -d '=' -f2)
+
+          if [ -z "$CONTAINER_PORT" ]; then
+            echo "❌ APP_PORT not found in $ENV_FILE"
+            exit 1
+          fi
+
+          echo "Running container: host port 3000 -> container port $CONTAINER_PORT"
+
+          sudo docker run -d \
+            --name node-app \
+            --env-file $ENV_FILE \
+            -p 3000:${CONTAINER_PORT} \
+            --restart unless-stopped \
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}

@@ -1,0 +1,35 @@
+# Use an official Node.js 20 image as the base for building
+FROM node:20 AS builder
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy package.json and package-lock.json first to leverage Docker cache
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --legacy-peer-deps
+
+# Copy the application source code
+COPY . .
+
+# Build the application (output will be in the dist directory)
+RUN npm run build
+
+# Use a lightweight Node.js 20 image for production
+FROM node:20-slim AS runtime
+
+# Set the working directory inside the runtime container
+WORKDIR /app
+
+# Copy necessary files from the builder stage
+COPY --from=builder /app/package*.json /app/
+COPY --from=builder /app/.uat.env /app/.env
+COPY --from=builder /app/node_modules /app/node_modules
+COPY --from=builder /app/dist /app/dist
+
+# Expose the application port (adjust according to your app's needs)
+EXPOSE 8005
+
+# Define the command to run the application
+CMD ["node", "dist/main.js"]

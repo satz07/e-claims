@@ -1,0 +1,511 @@
+{
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "claimNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "enum ClaimRegistry.Status",
+          "name": "oldStatus",
+          "type": "uint8"
+        },
+        {
+          "indexed": false,
+          "internalType": "enum ClaimRegistry.Status",
+          "name": "newStatus",
+          "type": "uint8"
+        }
+      ],
+      "name": "ClaimStatusUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "claimNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "claimIdHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "enum ClaimRegistry.Status",
+          "name": "status",
+          "type": "uint8"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "recordUseHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "ClaimUpserted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferred",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "claimNumber",
+          "type": "uint256"
+        }
+      ],
+      "name": "existsClaim",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "claimNumber",
+          "type": "uint256"
+        }
+      ],
+      "name": "getClaim",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "claimIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimNumber",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleContentHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "recordUseHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "fidHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "facilityLevelHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "schemeCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "crIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "nationalIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "claimTypeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "interventionCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "creationDate",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateFrom",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateTo",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimedTotal",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "ipsClaim",
+              "type": "bool"
+            },
+            {
+              "internalType": "enum ClaimRegistry.Status",
+              "name": "status",
+              "type": "uint8"
+            }
+          ],
+          "internalType": "struct ClaimRegistry.Claim",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "claimIdHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getClaimByClaimIdHash",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "claimIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimNumber",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleContentHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "recordUseHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "fidHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "facilityLevelHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "schemeCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "crIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "nationalIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "claimTypeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "interventionCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "creationDate",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateFrom",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateTo",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimedTotal",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "ipsClaim",
+              "type": "bool"
+            },
+            {
+              "internalType": "enum ClaimRegistry.Status",
+              "name": "status",
+              "type": "uint8"
+            }
+          ],
+          "internalType": "struct ClaimRegistry.Claim",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "s",
+          "type": "string"
+        }
+      ],
+      "name": "hashString",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "claimNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "enum ClaimRegistry.Status",
+          "name": "newStatus",
+          "type": "uint8"
+        }
+      ],
+      "name": "setClaimStatus",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "claimIdHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "enum ClaimRegistry.Status",
+          "name": "newStatus",
+          "type": "uint8"
+        }
+      ],
+      "name": "setClaimStatusByClaimIdHash",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "transferOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "claimIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimNumber",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "bundleContentHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "recordUseHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "fidHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "facilityLevelHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "schemeCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "crIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "nationalIdHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "claimTypeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "interventionCodeHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "creationDate",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateFrom",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dateTo",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "claimedTotal",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "ipsClaim",
+              "type": "bool"
+            },
+            {
+              "internalType": "enum ClaimRegistry.Status",
+              "name": "status",
+              "type": "uint8"
+            }
+          ],
+          "internalType": "struct ClaimRegistry.Claim",
+          "name": "c",
+          "type": "tuple"
+        }
+      ],
+      "name": "upsertClaim",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ]
+}

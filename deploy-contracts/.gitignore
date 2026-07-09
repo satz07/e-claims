@@ -1,0 +1,6 @@
+node_modules
+artifacts
+cache
+.env
+.claude
+1.txt

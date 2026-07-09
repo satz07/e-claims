@@ -1,0 +1,6 @@
+node_modules/
+.next/
+.specstory/
+.cursor/
+.vscode/
+.claude
