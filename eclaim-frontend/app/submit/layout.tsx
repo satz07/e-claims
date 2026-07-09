@@ -1,8 +1,8 @@
 "use client"
 
 import { ReactNode } from "react"
-import { AppShell } from "@/components/app-shell"
+import { WritePageShell } from "@/components/wallet/write-page-shell"
 
 export default function SubmitLayout({ children }: { children: ReactNode }) {
-  return <AppShell showWallet={false}>{children}</AppShell>
+  return <WritePageShell>{children}</WritePageShell>
 }

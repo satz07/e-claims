@@ -7,6 +7,13 @@ import { EclaimContractService } from './eclaim-contract.service';
 export class EclaimContractController {
   constructor(private readonly service: EclaimContractService) {}
 
+  /** Validate FHIR + return claim struct for MetaMask signing (user pays gas). */
+  @Post('prepare-submit')
+  @HttpCode(200)
+  async prepareSubmit(@Body() body: Record<string, unknown>) {
+    return this.service.prepareFhirSubmit(body);
+  }
+
   /** Anchor a FHIR R4 Bundle (Claim.use = claim | preauthorization). Backend signs chain tx. */
   @Post('submit')
   @HttpCode(201)

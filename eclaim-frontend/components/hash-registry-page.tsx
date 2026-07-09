@@ -1,8 +1,19 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useWriteContract, useAccount } from "wagmi"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { hashUtf8, toUnix } from "@/lib/onchain-hash"
+import {
+  VERIFIABLE_REGISTRY_ABI,
+  VERIFIABLE_REGISTRY_ADDRESSES,
+} from "@/lib/registry-contracts"
+import {
+  PROVIDER_REGISTRY_ABI,
+  PROVIDER_REGISTRY_ADDRESS,
+} from "@/lib/provider-contracts"
+import { writeContractAndWait } from "@/lib/write-contract"
 
 type Tab = "register" | "lookup" | "list"
 export type RegistryKind = "citizen" | "clinician" | "insurer" | "provider"
@@ -77,6 +88,8 @@ function SuccessBanner({ message, txHash }: { message: string; txHash?: string }
 
 export function HashRegistryPage({ config }: { config: RegistryConfig }) {
   const api = apiPath(config.kind)
+  const { isConnected, address } = useAccount()
+  const { writeContractAsync, isPending: isTxPending } = useWriteContract()
   const [tab, setTab] = useState<Tab>("register")
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<{ message: string; txHash?: string } | null>(null)
@@ -129,43 +142,56 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
     if (tab === "list") fetchList()
   }, [tab, fetchList])
 
-  const parseTxHash = (data: Record<string, unknown>) =>
-    String(data.txHash || data.transactionHash || "")
-
   const register = async () => {
+    if (!isConnected) {
+      setError("Connect MetaMask first — your wallet signs and pays gas.")
+      return
+    }
     setError(null)
     setSuccess(null)
     setLoading(true)
     try {
-      const body =
-        config.kind === "provider"
-          ? providerForm
-          : {
-              id: simpleForm.id,
-              meta: simpleForm.meta,
-              validFrom: simpleForm.validFrom,
-              validTo: simpleForm.validTo,
-            }
+      let txHash: string
 
-      const res = await fetch(`${api}/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.message || data?.error || "Register failed")
+      if (config.kind === "provider") {
+        txHash = await writeContractAndWait(writeContractAsync, {
+          address: PROVIDER_REGISTRY_ADDRESS,
+          abi: PROVIDER_REGISTRY_ABI,
+          functionName: "registerProvider",
+          args: [
+            hashUtf8(providerForm.providerId),
+            hashUtf8(providerForm.name),
+            hashUtf8(providerForm.level),
+            hashUtf8(providerForm.county),
+            hashUtf8(providerForm.facilityType),
+            toUnix(providerForm.licenseValidFrom),
+            toUnix(providerForm.licenseValidTo),
+          ],
+        }, address)
+      } else {
+        const registryAddress = VERIFIABLE_REGISTRY_ADDRESSES[config.kind]
+        txHash = await writeContractAndWait(writeContractAsync, {
+          address: registryAddress,
+          abi: VERIFIABLE_REGISTRY_ABI,
+          functionName: "register",
+          args: [
+            hashUtf8(simpleForm.id),
+            hashUtf8(simpleForm.meta || ""),
+            toUnix(simpleForm.validFrom),
+            toUnix(simpleForm.validTo),
+          ],
+        }, address)
+      }
 
       const id =
-        config.kind === "provider"
-          ? providerForm.providerId
-          : simpleForm.id
-      const txHash = parseTxHash(data)
+        config.kind === "provider" ? providerForm.providerId : simpleForm.id
       setSuccess({
-        message: `Registered ${id} on Spearhead.`,
-        txHash: txHash || undefined,
+        message: `Registered ${id} on Spearhead (signed with your wallet).`,
+        txHash,
       })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Register failed")
+      const err = e as { shortMessage?: string; message?: string }
+      setError(err?.shortMessage || err?.message || "Register failed — confirm in MetaMask")
     } finally {
       setLoading(false)
     }
@@ -211,7 +237,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
         <p className="text-sm text-muted-foreground mt-2">{config.description}</p>
         <p className="text-xs text-muted-foreground mt-1">
           Only <strong>hashed IDs</strong> and validity dates are stored on-chain — no names or PHI.
-          Backend sponsors gas; no wallet required.
+          <strong> MetaMask required</strong> — your wallet signs and pays gas (same as Issue Claim).
         </p>
       </div>
 
@@ -257,8 +283,15 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
             />
           </FormField>
           <div className="md:col-span-2">
-            <Button onClick={register} disabled={loading || !simpleForm.id}>
-              {loading ? "Submitting…" : "Register on Spearhead"}
+            <Button
+              onClick={register}
+              disabled={loading || isTxPending || !simpleForm.id}
+            >
+              {loading || isTxPending
+                ? isTxPending
+                  ? "Confirm in MetaMask…"
+                  : "Waiting for confirmation…"
+                : "Register on Spearhead"}
             </Button>
           </div>
         </div>
@@ -329,13 +362,18 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
               onClick={register}
               disabled={
                 loading ||
+                isTxPending ||
                 !providerForm.providerId ||
                 !providerForm.name ||
                 !providerForm.licenseValidFrom ||
                 !providerForm.licenseValidTo
               }
             >
-              {loading ? "Submitting…" : "Register on Spearhead"}
+              {loading || isTxPending
+                ? isTxPending
+                  ? "Confirm in MetaMask…"
+                  : "Waiting for confirmation…"
+                : "Register on Spearhead"}
             </Button>
           </div>
         </div>

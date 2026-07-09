@@ -280,6 +280,45 @@ export class EclaimContractService {
     }
   }
 
+  /** Parse + validate FHIR; return claim struct for client-side MetaMask signing (no server tx). */
+  async prepareFhirSubmit(raw: unknown) {
+    const parsed = parseFhirBundle(raw);
+    const isDuplicate = await this.checkDuplicate(parsed.claimId, parsed.recordUse);
+    if (isDuplicate) {
+      throw new BadRequestException(`Record already anchored for id "${parsed.claimId}"`);
+    }
+    await this.assertRegistriesAuthorize(parsed);
+    const claimNumber = await this.nextClaimNumber();
+    const claimStruct = buildClaimStruct(parsed, claimNumber);
+    return {
+      claimStruct: {
+        claimIdHash: claimStruct.claimIdHash,
+        claimNumber: claimStruct.claimNumber.toString(),
+        bundleIdHash: claimStruct.bundleIdHash,
+        bundleContentHash: claimStruct.bundleContentHash,
+        recordUseHash: claimStruct.recordUseHash,
+        fidHash: claimStruct.fidHash,
+        facilityLevelHash: claimStruct.facilityLevelHash,
+        schemeCodeHash: claimStruct.schemeCodeHash,
+        crIdHash: claimStruct.crIdHash,
+        nationalIdHash: claimStruct.nationalIdHash,
+        claimTypeHash: claimStruct.claimTypeHash,
+        interventionCodeHash: claimStruct.interventionCodeHash,
+        creationDate: claimStruct.creationDate.toString(),
+        dateFrom: claimStruct.dateFrom.toString(),
+        dateTo: claimStruct.dateTo.toString(),
+        claimedTotal: claimStruct.claimedTotal.toString(),
+        ipsClaim: claimStruct.ipsClaim,
+        status: claimStruct.status,
+      },
+      claimId: parsed.claimId,
+      recordUse: parsed.recordUse,
+      fid: parsed.fid,
+      bundleHash: parsed.bundleContentHash,
+      claimedTotal: parsed.claimedTotal.toString(),
+    };
+  }
+
   /** Parse FHIR Bundle, anchor on ClaimRegistry (hashes only — no PII on-chain). */
   async submitFhirBundle(raw: unknown) {
     const parsed = parseFhirBundle(raw);

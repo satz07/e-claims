@@ -3,10 +3,11 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useWriteContract } from "wagmi"
+import { useWriteContract, useAccount } from "wagmi"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { keccak256, stringToBytes } from "viem"
 import { CONTRACT_ADDRESS, UPSERT_CLAIM_ABI } from "@/lib/contracts"
+import { writeContractAndWait } from "@/lib/write-contract"
 import { randomUuid } from "@/lib/utils"
 
 const CLAIM_TYPES = [
@@ -52,6 +53,7 @@ export default function IssueClaimPage() {
     })
 
     const { writeContractAsync, isPending } = useWriteContract()
+    const { address } = useAccount()
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setForm({ ...form, [e.target.name]: e.target.value })
@@ -95,12 +97,12 @@ export default function IssueClaimPage() {
                 status:                 0,
             } as const
 
-            const txHash = await writeContractAsync({
+            const txHash = await writeContractAndWait(writeContractAsync, {
                 address: CONTRACT_ADDRESS,
                 abi: UPSERT_CLAIM_ABI,
                 functionName: "upsertClaim",
                 args: [claimStruct],
-            })
+            }, address)
 
             // Persist plaintext metadata in backend
             const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"

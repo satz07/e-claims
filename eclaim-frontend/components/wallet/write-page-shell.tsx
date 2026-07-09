@@ -1,8 +1,12 @@
-import { Sidebar } from "@/components/sidebar"
-import { ClaimsSearch } from "@/components/claims-search"
-import { WalletButton } from "@/components/wallet-button"
+"use client"
 
-export default function HomePage() {
+import { ReactNode } from "react"
+import { Sidebar } from "@/components/sidebar"
+import { WalletButton } from "@/components/wallet-button"
+import { WalletGate } from "@/components/wallet/WalletGate"
+
+/** Layout for pages that write on-chain via the user's wallet (MetaMask pays gas). */
+export function WritePageShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -11,7 +15,7 @@ export default function HomePage() {
           <WalletButton />
         </header>
         <main className="flex-1 px-4 md:px-8 py-6">
-          <ClaimsSearch />
+          <WalletGate>{children}</WalletGate>
         </main>
       </div>
     </div>

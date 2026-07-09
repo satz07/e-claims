@@ -2,9 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useWriteContract, useAccount } from "wagmi"
 import { Button } from "@/components/ui/button"
 import { buildFullQaMisSample } from "@/lib/qa-mis-full-sample"
 import { randomUuid } from "@/lib/utils"
+import { CONTRACT_ADDRESS, CONTRACT_OWNER_ADDRESS, UPSERT_CLAIM_ABI } from "@/lib/contracts"
+import { claimStructTuple, type PreparedClaimStruct } from "@/lib/claim-struct"
+import { writeContractAndWait } from "@/lib/write-contract"
 
 type RecordUse = "claim" | "preauthorization"
 type SampleKind = "minimal" | "full"
@@ -76,6 +80,8 @@ function withRecordUse(template: string, use: RecordUse, id: string) {
 }
 
 export default function SubmitFhirPage() {
+  const { isConnected, address } = useAccount()
+  const { writeContractAsync, isPending: isTxPending } = useWriteContract()
   const [recordUse, setRecordUse] = useState<RecordUse>("claim")
   const [sampleKind, setSampleKind] = useState<SampleKind>("minimal")
   const [jsonText, setJsonText] = useState(() => withRecordUse(SAMPLE_CLAIM, "claim", randomUuid()))
@@ -96,24 +102,47 @@ export default function SubmitFhirPage() {
   }
 
   const handleSubmit = async () => {
+    if (!isConnected) {
+      setError("Connect MetaMask first — your wallet signs and pays gas.")
+      return
+    }
     setError(null)
     setResult(null)
     setLoading(true)
     try {
       const body = JSON.parse(jsonText)
       const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"
-      const res = await fetch(`${base}/api/public/eclaim-contract/submit`, {
+
+      const prepRes = await fetch(`${base}/api/public/eclaim-contract/prepare-submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json", accept: "application/json" },
         body: JSON.stringify(body),
       })
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data?.message || data?.error || "Submit failed")
+      const prepared = await prepRes.json()
+      if (!prepRes.ok) {
+        throw new Error(prepared?.message || prepared?.error || "Validation failed")
       }
-      setResult(data)
+
+      const claimStruct = prepared.claimStruct as PreparedClaimStruct
+      const txHash = await writeContractAndWait(writeContractAsync, {
+        address: CONTRACT_ADDRESS,
+        abi: UPSERT_CLAIM_ABI,
+        functionName: "upsertClaim",
+        args: [claimStructTuple(claimStruct)],
+      }, address)
+
+      setResult({
+        recordUse: prepared.recordUse,
+        claimId: prepared.claimId,
+        claimNumber: claimStruct.claimNumber,
+        fid: prepared.fid,
+        claimedTotal: prepared.claimedTotal,
+        txHash,
+        bundleHash: prepared.bundleHash,
+      })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Submit failed")
+      const err = e as { shortMessage?: string; message?: string }
+      setError(err?.shortMessage || err?.message || "Submit failed — confirm in MetaMask")
     } finally {
       setLoading(false)
     }
@@ -127,7 +156,9 @@ export default function SubmitFhirPage() {
           Paste a QA MIS FHIR Bundle (minimal or full institutional payload). The backend hashes the{" "}
           <strong>entire bundle</strong> for integrity and anchors only required fields on-chain.{" "}
           <code className="text-xs">Claim.use</code> = <strong>claim</strong> or{" "}
-          <strong>preauthorization</strong>. No wallet required.
+          <strong>preauthorization</strong>. Connect MetaMask as contract owner{" "}
+          <code className="text-xs">{CONTRACT_OWNER_ADDRESS.slice(0, 6)}…{CONTRACT_OWNER_ADDRESS.slice(-4)}</code>{" "}
+          on <strong>Spearhead (99991)</strong> — other accounts cannot write.
         </p>
       </div>
 
@@ -164,8 +195,12 @@ export default function SubmitFhirPage() {
         onChange={(e) => setJsonText(e.target.value)}
       />
 
-      <Button onClick={handleSubmit} disabled={loading}>
-        {loading ? "Anchoring…" : "Anchor on Spearhead"}
+      <Button onClick={handleSubmit} disabled={loading || isTxPending}>
+        {loading
+          ? isTxPending
+            ? "Confirm in MetaMask…"
+            : "Waiting for confirmation…"
+          : "Anchor on Spearhead"}
       </Button>
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
