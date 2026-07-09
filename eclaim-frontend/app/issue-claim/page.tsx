@@ -7,6 +7,7 @@ import { useWriteContract } from "wagmi"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { keccak256, stringToBytes } from "viem"
 import { CONTRACT_ADDRESS, UPSERT_CLAIM_ABI } from "@/lib/contracts"
+import { randomUuid } from "@/lib/utils"
 
 const CLAIM_TYPES = [
     { value: "surgical",            label: "Surgical Claim" },
@@ -68,11 +69,11 @@ export default function IssueClaimPage() {
 
         // Auto-generate unique identifiers
         const claimNumber = Date.now()                          // unique uint256 from timestamp
-        const claimId = crypto.randomUUID()                     // globally unique string ID
+        const claimId = randomUuid()                     // globally unique string ID
         const shaCode = generateShaCode(claimId + claimNumber)  // short readable hash
 
         try {
-            const bundleId = crypto.randomUUID()
+            const bundleId = randomUuid()
             const claimStruct = {
                 claimIdHash:            h(claimId),
                 claimNumber:            BigInt(claimNumber),

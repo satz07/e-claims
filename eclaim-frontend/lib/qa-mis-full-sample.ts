@@ -1,7 +1,9 @@
 /** Full institutional QA MIS bundle (diagnosis, attachments, dual coverage, invoice extensions). */
+import { randomUuid } from "@/lib/utils"
+
 export function buildFullQaMisSample(use: "claim" | "preauthorization"): string {
-  const bundleId = crypto.randomUUID()
-  const claimId = crypto.randomUUID()
+  const bundleId = randomUuid()
+  const claimId = randomUuid()
 
   const bundle = {
     meta: {

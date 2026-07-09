@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { buildFullQaMisSample } from "@/lib/qa-mis-full-sample"
+import { randomUuid } from "@/lib/utils"
 
 type RecordUse = "claim" | "preauthorization"
 type SampleKind = "minimal" | "full"
@@ -66,8 +67,8 @@ const SAMPLE_CLAIM = `{
 }`
 
 function withRecordUse(template: string, use: RecordUse, id: string) {
-  const bundleId = crypto.randomUUID()
-  const recordId = id || crypto.randomUUID()
+  const bundleId = randomUuid()
+  const recordId = id || randomUuid()
   return template
     .replace("REPLACE-BUNDLE-ID", bundleId)
     .replace("REPLACE-CLAIM-UUID", recordId)
@@ -77,7 +78,7 @@ function withRecordUse(template: string, use: RecordUse, id: string) {
 export default function SubmitFhirPage() {
   const [recordUse, setRecordUse] = useState<RecordUse>("claim")
   const [sampleKind, setSampleKind] = useState<SampleKind>("minimal")
-  const [jsonText, setJsonText] = useState(() => withRecordUse(SAMPLE_CLAIM, "claim", crypto.randomUUID()))
+  const [jsonText, setJsonText] = useState(() => withRecordUse(SAMPLE_CLAIM, "claim", randomUuid()))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<Record<string, string> | null>(null)
@@ -88,7 +89,7 @@ export default function SubmitFhirPage() {
     setJsonText(
       kind === "full"
         ? buildFullQaMisSample(use)
-        : withRecordUse(SAMPLE_CLAIM, use, crypto.randomUUID()),
+        : withRecordUse(SAMPLE_CLAIM, use, randomUuid()),
     )
     setError(null)
     setResult(null)

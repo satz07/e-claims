@@ -15,9 +15,19 @@ import { User } from 'src/database/entities/users.entity';
 import { UserKyc } from 'src/database/entities/user-kyc.entity';
 import { DtpsCreateUserDto } from './dto/user/dtps-create-user.dto';
 import { DtpsCardApplicationApplyDto } from './dto/card/dtps-card-application-apply.dto';
-import sharp from 'sharp';
 import { DtpsActivateCardDto } from './dto/card/dtps-activate-card.dto';
 import { DtpsActivateReplacementCardDto } from './dto/card/dtps-activate-replacement-card.dto';
+
+async function loadSharp() {
+  try {
+    const mod = await import('sharp');
+    return mod.default;
+  } catch {
+    throw new InternalServerErrorException(
+      'Image processing (sharp) is not available on this server. Rebuild with: npm rebuild sharp --build-from-source',
+    );
+  }
+}
 
 @Injectable()
 export class DtpsService {
@@ -173,6 +183,7 @@ export class DtpsService {
         throw new BadRequestException('Invalid file upload');
       }
 
+      const sharp = await loadSharp();
       const pngBuffer = await sharp(file.buffer).png().toBuffer();
       return `data:image/png;base64,${pngBuffer.toString('base64')}`;
     };

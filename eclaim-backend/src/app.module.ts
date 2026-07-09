@@ -142,7 +142,7 @@ import { EclaimContractModule } from './eclaim-contract/eclaim-contract.module';
     MeModule,
     KeycloakModule,
     UserManagementModule,
-    DtpsModule,
+    ...(process.env.DISABLE_DTPS === 'true' ? [] : [DtpsModule]),
     DonationOpportunityModule,
     CampaignsModule,
     DonationsModule,
