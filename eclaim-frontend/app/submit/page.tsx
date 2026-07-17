@@ -173,8 +173,8 @@ export default function SubmitFhirPage() {
           <strong>entire bundle</strong> for integrity and anchors only required fields on-chain.{" "}
           <code className="text-xs">Claim.use</code> = <strong>claim</strong> or{" "}
           <strong>preauthorization</strong>. Connect MetaMask as contract owner{" "}
-          <code className="text-xs">{CONTRACT_OWNER_ADDRESS.slice(0, 6)}…{CONTRACT_OWNER_ADDRESS.slice(-4)}</code>{" "}
-          on <strong>{ACTIVE_NETWORK.shortName} ({ACTIVE_NETWORK.chainId})</strong> — other accounts cannot write.
+          <code className="text-xs">{CONTRACT_OWNER_ADDRESS.slice(0, 6)}…{CONTRACT_OWNER_ADDRESS.slice(-4)}</code>
+          {" "}(chain ID {ACTIVE_NETWORK.chainId}) — other accounts cannot write.
         </p>
       </div>
 
@@ -240,7 +240,7 @@ export default function SubmitFhirPage() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                View on {ACTIVE_NETWORK.shortName} explorer
+                View on explorer
               </a>
             </Button>
           </div>

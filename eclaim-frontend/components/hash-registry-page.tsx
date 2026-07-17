@@ -14,7 +14,7 @@ import {
   PROVIDER_REGISTRY_ADDRESS,
 } from "@/lib/provider-contracts"
 import { writeContractAndWait } from "@/lib/write-contract"
-import { ACTIVE_NETWORK, explorerTxUrl } from "@/lib/network"
+import { explorerTxUrl } from "@/lib/network"
 
 type Tab = "register" | "lookup" | "list"
 export type RegistryKind = "citizen" | "clinician" | "insurer" | "provider"
@@ -79,7 +79,7 @@ function SuccessBanner({ message, txHash }: { message: string; txHash?: string }
             target="_blank"
             rel="noopener noreferrer"
           >
-            View on {ACTIVE_NETWORK.shortName} explorer
+            View on explorer
           </a>
         </Button>
       )}
@@ -187,7 +187,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
       const id =
         config.kind === "provider" ? providerForm.providerId : simpleForm.id
       setSuccess({
-        message: `Registered ${id} on Spearhead (signed with your wallet).`,
+        message: `Registered ${id} (signed with your wallet).`,
         txHash,
       })
     } catch (e: unknown) {

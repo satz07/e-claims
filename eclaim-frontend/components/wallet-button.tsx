@@ -45,7 +45,9 @@ export function WalletButton() {
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel>
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Connected to {chain?.name}</span>
+              <span className="text-xs text-muted-foreground">
+                Connected{chain?.id != null ? ` · chain ${chain.id}` : ""}
+              </span>
               <span className="font-mono text-xs">{formatAddress(address)}</span>
             </div>
           </DropdownMenuLabel>

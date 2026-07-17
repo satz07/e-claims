@@ -24,7 +24,7 @@ export const activeChain = defineChain({
   },
   blockExplorers: {
     default: {
-      name: `${ACTIVE_NETWORK.shortName} Explorer`,
+      name: "Block explorer",
       url: ACTIVE_NETWORK.explorerUrl,
     },
   },

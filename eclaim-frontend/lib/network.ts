@@ -79,14 +79,22 @@ function resolveKey(raw?: string): ChainNetworkKey {
 /** Active network from NEXT_PUBLIC_CHAIN_NETWORK (default: spearhead). */
 export const ACTIVE_NETWORK_KEY = resolveKey(process.env.NEXT_PUBLIC_CHAIN_NETWORK)
 
+const baseNetwork = CHAIN_NETWORKS[ACTIVE_NETWORK_KEY]
+
+/** Display name: optional NEXT_PUBLIC_CHAIN_NAME, else "Chain {id}" (no branded names in UI). */
 export const ACTIVE_NETWORK: ChainNetworkConfig = {
-  ...CHAIN_NETWORKS[ACTIVE_NETWORK_KEY],
-  rpcUrl:
-    process.env.NEXT_PUBLIC_RPC_URL ||
-    CHAIN_NETWORKS[ACTIVE_NETWORK_KEY].rpcUrl,
-  explorerUrl:
-    process.env.NEXT_PUBLIC_EXPLORER_URL ||
-    CHAIN_NETWORKS[ACTIVE_NETWORK_KEY].explorerUrl,
+  ...baseNetwork,
+  name:
+    process.env.NEXT_PUBLIC_CHAIN_NAME?.trim() ||
+    `Chain ${baseNetwork.chainId}`,
+  shortName:
+    process.env.NEXT_PUBLIC_CHAIN_SHORT_NAME?.trim() ||
+    `Chain ${baseNetwork.chainId}`,
+  rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || baseNetwork.rpcUrl,
+  explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL || baseNetwork.explorerUrl,
+  chainId: process.env.NEXT_PUBLIC_CHAIN_ID
+    ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID, 10)
+    : baseNetwork.chainId,
 }
 
 export function explorerTxUrl(txHash: string): string {

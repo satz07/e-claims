@@ -52,8 +52,7 @@ async function assertOwnerWallet(account: `0x${string}`, contract: `0x${string}`
 }
 
 /**
- * Simulate + MetaMask sign + wait for receipt on the configured chain
- * (Spearhead 99991 or ADI Network 36900).
+ * Simulate + MetaMask sign + wait for receipt on the configured chain.
  */
 export async function writeContractAndWait(
   writeContractAsync: WriteContractAsync,
@@ -120,7 +119,7 @@ export async function writeContractAndWait(
   })
 
   if (receipt.status === 'reverted') {
-    throw new Error(`Transaction reverted on ${ACTIVE_NETWORK.shortName} after mining.`)
+    throw new Error(`Transaction reverted on chain ${ACTIVE_NETWORK.chainId} after mining.`)
   }
 
   return hash
