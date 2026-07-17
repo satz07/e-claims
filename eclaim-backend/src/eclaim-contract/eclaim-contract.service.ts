@@ -24,7 +24,7 @@ const META_FILE = path.join(process.cwd(), 'claim-meta.json');
 const ACTIVE_CHAIN = getActiveChain();
 const CONTRACT_ADDRESS =
   process.env.CLAIM_REGISTRY_ADDRESS ||
-  '0xA8eFbf955496518D6e3Cb10ABC90627671534088';
+  '0x9a6b73f558Bad360a3251C220D383A0f641a58Bc';
 const RPC_URL = ACTIVE_CHAIN.rpcUrl;
 
 const STATUS_MAP: Record<number, string> = {
@@ -253,7 +253,7 @@ export class EclaimContractService {
         claimRegistryAddress: CONTRACT_ADDRESS,
         providerRegistryAddress:
           process.env.PROVIDER_REGISTRY_ADDRESS ||
-          '0xeda747a951502878079a789DA5D3380dA6Ec2276',
+          '0x03f6849d7c37aF5E8535FFE6E10d4B6e3F44e8E8',
         citizenRegistryAddress: this.verifiableRegistries.addressFor('citizen'),
         clinicianRegistryAddress: this.verifiableRegistries.addressFor('clinician'),
         insurerRegistryAddress: this.verifiableRegistries.addressFor('insurer'),

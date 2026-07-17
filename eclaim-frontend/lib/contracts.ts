@@ -1,5 +1,5 @@
 export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_CLAIM_REGISTRY_ADDRESS ||
-  '0xA8eFbf955496518D6e3Cb10ABC90627671534088') as `0x${string}`
+  '0x9a6b73f558Bad360a3251C220D383A0f641a58Bc') as `0x${string}`
 
 /** On-chain owner for ClaimRegistry + all registries (only this wallet can write). */
 export const CONTRACT_OWNER_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_OWNER_ADDRESS ||

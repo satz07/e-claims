@@ -19,19 +19,20 @@ function deployerAccounts() {
 
 function hardhatNetworkFromKey(key) {
   const net = resolveNetwork(key);
+  const envPrefix = net.key.toUpperCase().replace(/-/g, "_");
   const maxFee =
-    process.env[`${key.toUpperCase().replace(/-/g, "_")}_MAX_FEE_GWEI`] ||
+    process.env[`${envPrefix}_MAX_FEE_GWEI`] ||
     process.env.MAX_FEE_GWEI ||
     net.maxFeePerGasGwei;
   const maxPriority =
-    process.env[`${key.toUpperCase().replace(/-/g, "_")}_MAX_PRIORITY_GWEI`] ||
+    process.env[`${envPrefix}_MAX_PRIORITY_GWEI`] ||
     process.env.MAX_PRIORITY_GWEI ||
     net.maxPriorityFeePerGasGwei;
 
   const rpcOverride =
-    process.env[`${net.key.toUpperCase()}_RPC_URL`] ||
-    (net.key === "spearhead" ? process.env.SPEARHEAD_RPC_URL : process.env.ADI_RPC_URL) ||
-    process.env.RPC_URL;
+    process.env[`${envPrefix}_RPC_URL`] ||
+    process.env.RPC_URL ||
+    (net.key === "spearhead" ? process.env.SPEARHEAD_RPC_URL : undefined);
 
   return {
     type: "http",
@@ -55,9 +56,11 @@ const config = {
   networks: {
     spearhead: hardhatNetworkFromKey("spearhead"),
     adi: hardhatNetworkFromKey("adi"),
+    apeiro: hardhatNetworkFromKey("apeiro"),
     // aliases
     mainnet: hardhatNetworkFromKey("adi"),
     "adi-mainnet": hardhatNetworkFromKey("adi"),
+    "apeiro-network": hardhatNetworkFromKey("apeiro"),
   },
 };
 

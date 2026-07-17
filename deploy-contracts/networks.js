@@ -1,6 +1,8 @@
 /**
- * Shared ADI / Spearhead network definitions for Hardhat deploys and apps.
+ * Shared network definitions for Hardhat deploys and apps.
  * Select with --network <key> or CHAIN_NETWORK / NEXT_PUBLIC_CHAIN_NETWORK.
+ *
+ * Keys: spearhead | adi | apeiro
  */
 export const NETWORKS = {
   spearhead: {
@@ -11,8 +13,8 @@ export const NETWORKS = {
     rpcUrl: "https://rpc.spearhead.adifoundation.ai",
     explorerUrl: "https://explorer.spearhead.adifoundation.ai",
     explorerAltUrl: null,
+    bridgeUrl: null,
     currency: { name: "ADI", symbol: "ADI", decimals: 18 },
-    // EIP-1559 caps that work when RPC fee estimation is flaky
     maxFeePerGasGwei: 1000,
     maxPriorityFeePerGasGwei: 100,
     protocolVersion: null,
@@ -26,6 +28,7 @@ export const NETWORKS = {
     rpcUrl: "https://rpc.adifoundation.ai",
     explorerUrl: "https://explorer.adifoundation.ai",
     explorerAltUrl: "https://explorer-bls.adifoundation.ai",
+    bridgeUrl: null,
     currency: { name: "ADI", symbol: "ADI", decimals: 18 },
     maxFeePerGasGwei: 100,
     maxPriorityFeePerGasGwei: 10,
@@ -36,6 +39,21 @@ export const NETWORKS = {
     sequencerVersion: "v0.13.0-b1",
     externalNodeVersion: "v0.13.0-b4",
     notes: "ADI Network mainnet",
+  },
+  apeiro: {
+    key: "apeiro",
+    name: "Apeiro Network",
+    shortName: "Apeiro",
+    chainId: 37001,
+    rpcUrl: "https://rpc.apeiro.adifoundation.ai",
+    explorerUrl: "https://explorer.apeiro.adifoundation.ai",
+    explorerAltUrl: "https://explorer-bls.apeiro.adifoundation.ai",
+    bridgeUrl: "https://bridge.apeiro.adifoundation.ai",
+    currency: { name: "ADI", symbol: "ADI", decimals: 18 },
+    maxFeePerGasGwei: 100,
+    maxPriorityFeePerGasGwei: 10,
+    protocolVersion: null,
+    notes: "Apeiro L3 (ADI Foundation)",
   },
 };
 
@@ -49,6 +67,9 @@ export function resolveNetwork(key) {
     mainnet: "adi",
     "adi-mainnet": "adi",
     "adi-network": "adi",
+    apeiro: "apeiro",
+    "apeiro-network": "apeiro",
+    "apeiro-mainnet": "apeiro",
   };
   const resolved = aliases[k] || k;
   const net = NETWORKS[resolved];

@@ -1,8 +1,8 @@
 /**
  * Active chain for the E-claims dapp.
- * Set NEXT_PUBLIC_CHAIN_NETWORK=spearhead | adi (aliases: mainnet, adi-mainnet)
+ * Set NEXT_PUBLIC_CHAIN_NETWORK=spearhead | adi | apeiro
  */
-export type ChainNetworkKey = "spearhead" | "adi"
+export type ChainNetworkKey = "spearhead" | "adi" | "apeiro"
 
 export type ChainNetworkConfig = {
   key: ChainNetworkKey
@@ -12,6 +12,7 @@ export type ChainNetworkConfig = {
   rpcUrl: string
   explorerUrl: string
   explorerAltUrl?: string
+  bridgeUrl?: string
   currency: { name: string; symbol: string; decimals: number }
   maxFeePerGasGwei: number
   maxPriorityFeePerGasGwei: number
@@ -49,12 +50,28 @@ export const CHAIN_NETWORKS: Record<ChainNetworkKey, ChainNetworkConfig> = {
     assetRouter: "0x47eec6f57c7e84391ba6c9ac976537d0db0bb257",
     protocolVersion: "v0.30.1",
   },
+  apeiro: {
+    key: "apeiro",
+    name: "Apeiro Network",
+    shortName: "Apeiro",
+    chainId: 37001,
+    rpcUrl: "https://rpc.apeiro.adifoundation.ai",
+    explorerUrl: "https://explorer.apeiro.adifoundation.ai",
+    explorerAltUrl: "https://explorer-bls.apeiro.adifoundation.ai",
+    bridgeUrl: "https://bridge.apeiro.adifoundation.ai",
+    currency: { name: "ADI", symbol: "ADI", decimals: 18 },
+    maxFeePerGasGwei: 100,
+    maxPriorityFeePerGasGwei: 10,
+  },
 }
 
 function resolveKey(raw?: string): ChainNetworkKey {
   const k = (raw || "spearhead").toLowerCase().trim()
   if (k === "adi" || k === "mainnet" || k === "adi-mainnet" || k === "adi-network") {
     return "adi"
+  }
+  if (k === "apeiro" || k === "apeiro-network" || k === "apeiro-mainnet") {
+    return "apeiro"
   }
   return "spearhead"
 }

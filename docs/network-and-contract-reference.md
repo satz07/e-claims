@@ -1,6 +1,55 @@
 # Network & contract reference
 
-Quick reference for **Spearhead**, **RPC**, and the **ClaimRegistry** contract used by E-claims. Use this page when connecting a wallet, verifying transactions, or sharing links with auditors and partners.
+Quick reference for **Spearhead**, **ADI**, **Apeiro**, RPC, and contracts used by E-claims. Use this page when connecting a wallet, verifying transactions, or sharing links with auditors and partners.
+
+App switch: `CHAIN_NETWORK` / `NEXT_PUBLIC_CHAIN_NETWORK` = `spearhead` | `adi` | `apeiro`.
+
+---
+
+## Supported networks
+
+| Key | Name | Chain ID | RPC | Explorer |
+|-----|------|----------|-----|----------|
+| `spearhead` | Spearhead L3 | `99991` | https://rpc.spearhead.adifoundation.ai | https://explorer.spearhead.adifoundation.ai |
+| `adi` | ADI Network | `36900` | https://rpc.adifoundation.ai | https://explorer.adifoundation.ai |
+| `apeiro` | Apeiro Network | `37001` | https://rpc.apeiro.adifoundation.ai | https://explorer.apeiro.adifoundation.ai |
+
+**Apeiro extras:** BLS explorer https://explorer-bls.apeiro.adifoundation.ai · Bridge https://bridge.apeiro.adifoundation.ai
+
+**Portal (demo):** `https://eclaim.apeiro-digital.com/`
+
+**Server env paste files:** `deploy-contracts/SERVER-ENV-ADI.txt`, `deploy-contracts/SERVER-ENV-APEIRO.txt`
+
+**ADI L3 background:** [L3 Chains — ADI Network Components](https://docs.adi.foundation/adi-network-components/overview-1)
+
+---
+
+## Apeiro Network (current fresh deploy — 2026-07-17)
+
+| Setting | Value |
+|---------|--------|
+| **Network name** | Apeiro Network |
+| **Chain ID** | `37001` |
+| **RPC URL** | `https://rpc.apeiro.adifoundation.ai` |
+| **Explorer** | https://explorer.apeiro.adifoundation.ai |
+| **Owner / deployer** | `0xCb01D9DEc076837eF915E0ffd8d9182264FC5FAE` |
+
+| Contract | Address |
+|----------|---------|
+| **ClaimRegistry** | `0xA8eFbf955496518D6e3Cb10ABC90627671534088` |
+| **ProviderRegistry** | `0xeda747a951502878079a789DA5D3380dA6Ec2276` |
+| **CitizenRegistry** | `0xb859A8D8e23D8581aafb5e7C03A8CC2F854a9Cc4` |
+| **ClinicianRegistry** | `0xd646829b3310a17B660079acc7F4A97DBFC9ce2D` |
+| **InsurerRegistry** | `0x64e8Ffca1907B0769Bf02cB60DC62D0e1070a591` |
+
+Full JSON: `deploy-contracts/deployed-apeiro.json` · Server paste: `deploy-contracts/SERVER-ENV-APEIRO.txt`
+
+**Deploy:** `cd deploy-contracts && npm run deploy:all:apeiro`
+
+**Seed demo IDs after deploy:**
+```bash
+curl -X POST http://localhost:8001/api/public/integration/seed-demo-registries
+```
 
 ---
 
@@ -13,10 +62,6 @@ Quick reference for **Spearhead**, **RPC**, and the **ClaimRegistry** contract u
 | **RPC URL (HTTPS)** | `https://rpc.spearhead.adifoundation.ai` |
 | **Native currency** | ADI (app metadata); wallets may show **SPR** or another symbol depending on how the network was added |
 | **Decimals** | `18` |
-
-**Portal (demo):** `https://eclaim.apeiro-digital.com/`
-
-**ADI L3 background:** [L3 Chains — ADI Network Components](https://docs.adi.foundation/adi-network-components/overview-1)
 
 ---
 

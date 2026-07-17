@@ -11,7 +11,7 @@ import { waitAndAudit } from './tx-audit-log';
 
 const PROVIDER_REGISTRY_ADDRESS =
   process.env.PROVIDER_REGISTRY_ADDRESS ||
-  '0xeda747a951502878079a789DA5D3380dA6Ec2276';
+  '0x03f6849d7c37aF5E8535FFE6E10d4B6e3F44e8E8';
 const RPC_URL = getActiveChain().rpcUrl;
 
 const STATUS_MAP: Record<number, string> = {

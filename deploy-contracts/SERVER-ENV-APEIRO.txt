@@ -1,0 +1,53 @@
+# ============================================================
+# COPY THESE TO THE SERVER
+# Apeiro Network — deploy 2026-07-17
+# Chain ID 37001 | RPC https://rpc.apeiro.adifoundation.ai
+# ============================================================
+
+# ---------- eclaim-backend/.env (blockchain section) ----------
+CHAIN_NETWORK=apeiro
+APEIRO_RPC_URL=https://rpc.apeiro.adifoundation.ai
+CLAIM_REGISTRY_ADDRESS=0xA8eFbf955496518D6e3Cb10ABC90627671534088
+PROVIDER_REGISTRY_ADDRESS=0xeda747a951502878079a789DA5D3380dA6Ec2276
+CITIZEN_REGISTRY_ADDRESS=0xb859A8D8e23D8581aafb5e7C03A8CC2F854a9Cc4
+CLINICIAN_REGISTRY_ADDRESS=0xd646829b3310a17B660079acc7F4A97DBFC9ce2D
+INSURER_REGISTRY_ADDRESS=0x64e8Ffca1907B0769Bf02cB60DC62D0e1070a591
+OWNER_PRIVATE_KEY=<keep-your-existing-key>
+REGISTRY_VALIDATION_ENABLED=true
+DISABLE_DTPS=true
+APP_PORT=8001
+
+# Optional legacy aliases (if still used):
+# ECLAIM_RPC_URL=https://rpc.apeiro.adifoundation.ai
+# ECLAIM_CHAIN_ID=37001
+# ECLAIM_NETWORK_NAME=apeiro
+# ECLAIM_CONTRACT_ADDRESS=0xA8eFbf955496518D6e3Cb10ABC90627671534088
+
+# ---------- eclaim-frontend/.env.local ----------
+NEXT_PUBLIC_BACKEND_URL=https://eclaim-api.apeiro-digital.com
+NEXT_PUBLIC_CHAIN_NETWORK=apeiro
+NEXT_PUBLIC_RPC_URL=https://rpc.apeiro.adifoundation.ai
+NEXT_PUBLIC_EXPLORER_URL=https://explorer.apeiro.adifoundation.ai
+NEXT_PUBLIC_CLAIM_REGISTRY_ADDRESS=0xA8eFbf955496518D6e3Cb10ABC90627671534088
+NEXT_PUBLIC_PROVIDER_REGISTRY_ADDRESS=0xeda747a951502878079a789DA5D3380dA6Ec2276
+NEXT_PUBLIC_CITIZEN_REGISTRY_ADDRESS=0xb859A8D8e23D8581aafb5e7C03A8CC2F854a9Cc4
+NEXT_PUBLIC_CLINICIAN_REGISTRY_ADDRESS=0xd646829b3310a17B660079acc7F4A97DBFC9ce2D
+NEXT_PUBLIC_INSURER_REGISTRY_ADDRESS=0x64e8Ffca1907B0769Bf02cB60DC62D0e1070a591
+NEXT_PUBLIC_CONTRACT_OWNER_ADDRESS=0xCb01D9DEc076837eF915E0ffd8d9182264FC5FAE
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=demo
+
+# ---------- After deploy on server ----------
+# 1. Restart backend (pm2/systemd) so CHAIN_NETWORK=apeiro is loaded
+# 2. Rebuild frontend (NEXT_PUBLIC_* are bake-time)
+# 3. MetaMask: add Apeiro (chainId 37001, RPC + explorer above)
+# 4. Seed demo registries (owner wallet must have gas on Apeiro):
+#
+#    curl -X POST https://eclaim-api.apeiro-digital.com/api/public/integration/seed-demo-registries
+#
+# Local:
+#    curl -X POST http://localhost:8001/api/public/integration/seed-demo-registries
+
+# ---------- Explorers ----------
+# https://explorer.apeiro.adifoundation.ai
+# https://explorer-bls.apeiro.adifoundation.ai
+# Bridge: https://bridge.apeiro.adifoundation.ai

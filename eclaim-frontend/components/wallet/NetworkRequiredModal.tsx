@@ -27,8 +27,8 @@ export function NetworkRequiredModal() {
                 <p className="text-xs text-gray-500">
                     RPC: <code>{ACTIVE_NETWORK.rpcUrl}</code>
                     <br />
-                    Set <code>NEXT_PUBLIC_CHAIN_NETWORK=spearhead</code> or{" "}
-                    <code>adi</code> in the frontend env, then rebuild.
+                    Set <code>NEXT_PUBLIC_CHAIN_NETWORK=spearhead</code>,{" "}
+                    <code>adi</code>, or <code>apeiro</code> in the frontend env, then rebuild.
                 </p>
                 <Button
                     className="w-full"

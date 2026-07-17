@@ -5,11 +5,11 @@ export const VERIFIABLE_REGISTRY_ADDRESSES: Record<
   `0x${string}`
 > = {
   citizen: (process.env.NEXT_PUBLIC_CITIZEN_REGISTRY_ADDRESS ||
-    '0xb859A8D8e23D8581aafb5e7C03A8CC2F854a9Cc4') as `0x${string}`,
+    '0xA6630ABf26203fD7DA2e1Ea326B0C2DAF4e90281') as `0x${string}`,
   clinician: (process.env.NEXT_PUBLIC_CLINICIAN_REGISTRY_ADDRESS ||
-    '0xd646829b3310a17B660079acc7F4A97DBFC9ce2D') as `0x${string}`,
+    '0xCe8E44ef911072337147b8232506EC6188c86894') as `0x${string}`,
   insurer: (process.env.NEXT_PUBLIC_INSURER_REGISTRY_ADDRESS ||
-    '0x64e8Ffca1907B0769Bf02cB60DC62D0e1070a591') as `0x${string}`,
+    '0x84eceD2F5fD90275454B5F4af3317Ea88F483CF7') as `0x${string}`,
 }
 
 export const VERIFIABLE_REGISTRY_ABI = [

@@ -292,7 +292,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
                 ? isTxPending
                   ? "Confirm in MetaMask…"
                   : "Waiting for confirmation…"
-                : "Register on Spearhead"}
+                : "Register on Chain"}
             </Button>
           </div>
         </div>
@@ -374,7 +374,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
                 ? isTxPending
                   ? "Confirm in MetaMask…"
                   : "Waiting for confirmation…"
-                : "Register on Spearhead"}
+                : "Register on Chain"}
             </Button>
           </div>
         </div>
