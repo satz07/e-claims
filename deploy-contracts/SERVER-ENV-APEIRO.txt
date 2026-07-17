@@ -40,12 +40,19 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=demo
 # 1. Restart backend (pm2/systemd) so CHAIN_NETWORK=apeiro is loaded
 # 2. Rebuild frontend (NEXT_PUBLIC_* are bake-time)
 # 3. MetaMask: add Apeiro (chainId 37001, RPC + explorer above)
-# 4. Seed demo registries (owner wallet must have gas on Apeiro):
+# 4. Seed (owner wallet must have gas on Apeiro):
 #
+#    # Single classic demo IDs:
 #    curl -X POST https://eclaim-api.apeiro-digital.com/api/public/integration/seed-demo-registries
+#
+#    # Bulk: 5 of each registry + 50 claims/preauths (~5–10 min).
+#    # Skip if you already seeded from local on the SAME Apeiro contracts —
+#    # on-chain data is shared; Claims list reads from chain after this backend deploy.
+#    curl -X POST https://eclaim-api.apeiro-digital.com/api/public/integration/seed-bulk-demo
 #
 # Local:
 #    curl -X POST http://localhost:8001/api/public/integration/seed-demo-registries
+#    curl -X POST http://localhost:8001/api/public/integration/seed-bulk-demo
 
 # ---------- Explorers ----------
 # https://explorer.apeiro.adifoundation.ai

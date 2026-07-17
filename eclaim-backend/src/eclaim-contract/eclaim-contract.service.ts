@@ -44,6 +44,50 @@ function h(s: string): string {
   return ethers.keccak256(ethers.toUtf8Bytes(s));
 }
 
+/** Known plaintexts reversible from on-chain hashes (raw IDs are never stored on-chain). */
+const KNOWN_LABELS: string[] = [
+  'claim',
+  'preauthorization',
+  'institutional',
+  'FID-35-108719-7',
+  'CR3248022528592-4',
+  'CAT-SHA-001',
+  'CMP-DEMO-001',
+  'PMF-12-001',
+  'LEVEL 2',
+  'LEVEL 3',
+  'LEVEL 4',
+  'LEVEL 5',
+  'LEVEL 6',
+  ...[2, 3, 4, 5].flatMap((i) => {
+    const p = String(i).padStart(3, '0');
+    return [`FID-DEMO-${p}`, `CR-DEMO-${p}`, `CAT-DEMO-${p}`, `CMP-DEMO-${p}`];
+  }),
+];
+
+const HASH_TO_LABEL = new Map<string, string>(
+  KNOWN_LABELS.map((label) => [h(label).toLowerCase(), label]),
+);
+
+function shortHash(hash: string | undefined, head = 10, tail = 8): string {
+  if (!hash || hash === ZERO_HASH) return '—';
+  const s = String(hash);
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+function labelFromHash(hash: string | undefined): string {
+  if (!hash || hash === ZERO_HASH) return '—';
+  return HASH_TO_LABEL.get(String(hash).toLowerCase()) || shortHash(String(hash));
+}
+
+function recordUseFromHash(hash: string | undefined): RecordUse | '—' {
+  if (!hash || hash === ZERO_HASH) return '—';
+  const label = HASH_TO_LABEL.get(String(hash).toLowerCase());
+  if (label === 'claim' || label === 'preauthorization') return label;
+  return '—';
+}
+
 export interface ClaimMeta {
   source?: 'fhir' | 'demo';
   claimId: string;
@@ -188,23 +232,35 @@ export class EclaimContractService {
   }
 
   private mapClaimStruct(claim: any, meta?: ClaimMeta) {
+    const recordUse =
+      meta?.recordUse ||
+      recordUseFromHash(claim?.recordUseHash) ||
+      '—';
+    const claimType =
+      meta?.claimType ||
+      labelFromHash(claim?.claimTypeHash);
     return {
       claimNumber: claim.claimNumber.toString(),
-      claimId: meta?.claimId || '—',
-      recordUse: meta?.recordUse || '—',
-      claimType: meta?.claimType || '—',
-      fid: meta?.fid || '—',
-      crId: meta?.crId || '—',
-      schemeCode: meta?.schemeCode || '—',
-      facilityLevel: meta?.facilityLevel || '—',
-      interventionCode: meta?.interventionCode || '—',
-      bundleId: meta?.bundleId || '—',
+      claimId: meta?.claimId?.trim() || shortHash(claim?.claimIdHash),
+      claimIdHash: claim?.claimIdHash ? String(claim.claimIdHash) : undefined,
+      recordUse,
+      claimType: claimType === '—' ? '—' : claimType,
+      fid: meta?.fid?.trim() || labelFromHash(claim?.fidHash),
+      crId: meta?.crId?.trim() || labelFromHash(claim?.crIdHash),
+      schemeCode: meta?.schemeCode?.trim() || labelFromHash(claim?.schemeCodeHash),
+      facilityLevel:
+        meta?.facilityLevel?.trim() || labelFromHash(claim?.facilityLevelHash),
+      interventionCode:
+        meta?.interventionCode?.trim() ||
+        labelFromHash(claim?.interventionCodeHash),
+      bundleId: meta?.bundleId?.trim() || shortHash(claim?.bundleIdHash),
       ipsClaim: meta?.ipsClaim ?? claim.ipsClaim ?? false,
       claimedTotal: claim.claimedTotal.toString(),
       dateFrom: this.formatUnix(claim.dateFrom),
       dateTo: this.formatUnix(claim.dateTo),
       creationDate: meta?.creationDate || this.formatUnix(claim.creationDate),
       bundleHash: claim.bundleContentHash ?? claim.shaPackageCodeHash,
+      status: STATUS_MAP[Number(claim.status)] || 'unknown',
     };
   }
 
@@ -532,50 +588,39 @@ export class EclaimContractService {
         }
       }
 
-      const fhirOrdered: number[] = [];
-      for (const n of ordered) {
-        const meta = this.metaCache.get(n);
-        if (this.isDemoMeta(meta)) continue;
-        if (!meta?.claimId?.trim()) continue;
-        if (meta.source === 'fhir' || (meta.claimType === 'institutional' && !meta.patientName)) {
-          fhirOrdered.push(n);
-        }
-      }
+      // Newest first
+      ordered.reverse();
 
-      const filteredOrdered = recordUse
-        ? fhirOrdered.filter((n) => this.metaCache.get(n)?.recordUse === recordUse)
-        : fhirOrdered;
-      const filteredTotal = filteredOrdered.length;
-      const filteredPages = Math.ceil(filteredTotal / size) || 1;
-      const sliceIds = filteredOrdered.slice(page * size, page * size + size);
-
-      const claims = await Promise.all(
-        sliceIds.map(async (claimNumber) => {
-          const meta = this.metaCache.get(claimNumber);
+      // On-chain first — does not require local claim-meta.json
+      const loaded = await Promise.all(
+        ordered.map(async (n) => {
+          const meta = this.metaCache.get(n);
+          if (this.isDemoMeta(meta)) return null;
           try {
-            const claim = await this.ownerStaticCall('getClaim', claimNumber);
-            return this.mapClaimStruct(claim, meta);
+            const claim = await this.ownerStaticCall('getClaim', n);
+            if (!this.isFhirClaim(n, meta, claim)) return null;
+            const use =
+              meta?.recordUse || recordUseFromHash(claim.recordUseHash);
+            if (recordUse && use !== recordUse) return null;
+            return { n, claim, meta };
           } catch {
-            return {
-              claimNumber: claimNumber.toString(),
-              claimId: meta?.claimId || '—',
-              recordUse: meta?.recordUse || '—',
-              claimType: meta?.claimType || '—',
-              fid: meta?.fid || '—',
-              crId: meta?.crId || '—',
-              schemeCode: meta?.schemeCode || '—',
-              facilityLevel: meta?.facilityLevel || '—',
-              interventionCode: meta?.interventionCode || '—',
-              bundleId: meta?.bundleId || '—',
-              ipsClaim: meta?.ipsClaim ?? false,
-              claimedTotal: meta?.claimedTotal || '—',
-              dateFrom: '—',
-              dateTo: '—',
-              creationDate: meta?.creationDate || '—',
-              bundleHash: '—',
-            };
+            return null;
           }
         }),
+      );
+
+      const fhirRows = loaded.filter(Boolean) as {
+        n: number;
+        claim: any;
+        meta?: ClaimMeta;
+      }[];
+
+      const filteredTotal = fhirRows.length;
+      const filteredPages = Math.ceil(filteredTotal / size) || 1;
+      const slice = fhirRows.slice(page * size, page * size + size);
+
+      const claims = slice.map(({ claim, meta }) =>
+        this.mapClaimStruct(claim, meta),
       );
 
       return {

@@ -16,4 +16,10 @@ export class IntegrationController {
   seedDemoRegistries() {
     return this.service.seedDemoRegistries();
   }
+
+  /** 5 of each registry + 5 claims & 5 preauths per provider (50 anchors). */
+  @Post('seed-bulk-demo')
+  seedBulkDemo() {
+    return this.service.seedBulkDemo();
+  }
 }
