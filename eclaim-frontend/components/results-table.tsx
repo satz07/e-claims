@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { ClaimDetailCard } from "./claim-detail-card"
 import {
   formatCareSetting,
@@ -8,14 +9,93 @@ import {
   formatRecordUse,
   type ClaimRow,
 } from "@/lib/claim-display"
+import { Input } from "./ui/input"
+import { Button } from "./ui/button"
 
 interface ResultsTableProps {
   results: ClaimRow[]
   isLoading: boolean
   page: number
   totalPages: number
+  totalElements?: number
+  pageSize?: number
   onPageChange?: (page: number) => void
+  onPageSizeChange?: (size: number) => void
   detailMode?: boolean
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  sizeDraft,
+  setSizeDraft,
+  onPageChange,
+  onPageSizeChange,
+  pageSize,
+}: {
+  page: number
+  totalPages: number
+  pageSize: number
+  sizeDraft: string
+  setSizeDraft: (v: string) => void
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (size: number) => void
+}) {
+  if (!onPageChange) return null
+
+  const applySize = () => {
+    if (!onPageSizeChange) return
+    const n = parseInt(sizeDraft, 10)
+    onPageSizeChange(Number.isFinite(n) ? n : pageSize)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-3">
+      {onPageSizeChange && (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="whitespace-nowrap">Per page</span>
+          <Input
+            type="number"
+            min={1}
+            max={100}
+            value={sizeDraft}
+            onChange={(e) => setSizeDraft(e.target.value)}
+            onBlur={applySize}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                applySize()
+              }
+            }}
+            className="h-8 w-16 px-2 text-sm"
+          />
+        </label>
+      )}
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page === 0 || totalPages <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </Button>
+        <span className="text-sm text-foreground whitespace-nowrap px-1">
+          Page {totalPages === 0 ? 0 : page + 1} of {totalPages || 1}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page + 1 >= totalPages || totalPages <= 1}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 export function ResultsTable({
@@ -23,9 +103,18 @@ export function ResultsTable({
   isLoading,
   page,
   totalPages,
+  totalElements = 0,
+  pageSize = 20,
   onPageChange,
+  onPageSizeChange,
   detailMode = false,
 }: ResultsTableProps) {
+  const [sizeDraft, setSizeDraft] = useState(String(pageSize))
+
+  useEffect(() => {
+    setSizeDraft(String(pageSize))
+  }, [pageSize])
+
   if (isLoading) {
     return (
       <div className="py-16 flex justify-center gap-3">
@@ -47,11 +136,24 @@ export function ResultsTable({
     return <ClaimDetailCard claim={results[0]} />
   }
 
+  const total = totalElements || results.length
+
   return (
-    <div className="bg-background">
-      <h2 className="text-xl md:text-2xl font-semibold text-foreground mb-4">
-        {results.length} claim{results.length === 1 ? "" : "s"}
-      </h2>
+    <div className="bg-background space-y-3">
+      <div className="flex justify-end">
+        <PaginationControls
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          sizeDraft={sizeDraft}
+          setSizeDraft={setSizeDraft}
+          onPageChange={onPageChange}
+          onPageSizeChange={(size) => {
+            setSizeDraft(String(size))
+            onPageSizeChange?.(size)
+          }}
+        />
+      </div>
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="min-w-full border-collapse">
@@ -103,25 +205,10 @@ export function ResultsTable({
         </table>
       </div>
 
-      {onPageChange && totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-6">
-          <button
-            disabled={page === 0}
-            onClick={() => onPageChange(page - 1)}
-            className="px-4 py-2 border rounded disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <span className="text-sm">Page {page + 1} of {totalPages}</span>
-          <button
-            disabled={page + 1 >= totalPages}
-            onClick={() => onPageChange(page + 1)}
-            className="px-4 py-2 border rounded disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      <p className="text-sm text-muted-foreground pt-1">
+        Total <span className="font-medium text-foreground">{total}</span>{" "}
+        claim{total === 1 ? "" : "s"}
+      </p>
     </div>
   )
 }

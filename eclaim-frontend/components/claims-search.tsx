@@ -1,14 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { SearchForm } from "./search-form"
 import { ResultsTable } from "./results-table"
 
 export function ClaimsSearch() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [page, setPage] = useState(0)
-  const [pageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(20)
   const [totalPages, setTotalPages] = useState(0)
+  const [totalElements, setTotalElements] = useState(0)
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -16,13 +17,13 @@ export function ClaimsSearch() {
 
   const base = () => process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"
 
-  const loadClaims = async (pageNo = 0) => {
+  const loadClaims = useCallback(async (pageNo = 0, size = pageSize) => {
     try {
       setLoading(true)
       setSearchMode("list")
       const url = new URL(`${base()}/api/public/eclaim-contract`)
       url.searchParams.set("page", pageNo.toString())
-      url.searchParams.set("size", pageSize.toString())
+      url.searchParams.set("size", size.toString())
 
       const res = await fetch(url.toString(), {
         headers: { accept: "application/json" },
@@ -32,6 +33,7 @@ export function ClaimsSearch() {
       const data = await res.json()
       setSearchResults(data?.claims || [])
       setTotalPages(data?.page?.totalPages || 0)
+      setTotalElements(data?.page?.totalElements || 0)
       setPage(pageNo)
     } catch (err: any) {
       setErrorMessage(err.message)
@@ -39,7 +41,7 @@ export function ClaimsSearch() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [pageSize])
 
   const handleSearch = async ({ claimId }: { claimId: string }) => {
     try {
@@ -57,13 +59,23 @@ export function ClaimsSearch() {
       const claim = await res.json()
       setSearchResults([claim])
       setTotalPages(1)
+      setTotalElements(1)
       setPage(0)
     } catch (err: any) {
       setSearchResults([])
+      setTotalElements(0)
       setErrorMessage(err.message)
       setModalOpen(true)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    const next = Math.min(100, Math.max(1, size || 20))
+    setPageSize(next)
+    if (searchMode === "list") {
+      loadClaims(0, next)
     }
   }
 
@@ -83,7 +95,10 @@ export function ClaimsSearch() {
         isLoading={loading}
         page={page}
         totalPages={totalPages}
-        onPageChange={searchMode === "list" ? loadClaims : undefined}
+        totalElements={totalElements}
+        pageSize={pageSize}
+        onPageChange={searchMode === "list" ? (p) => loadClaims(p) : undefined}
+        onPageSizeChange={searchMode === "list" ? handlePageSizeChange : undefined}
         detailMode={searchMode === "claimId"}
       />
 
