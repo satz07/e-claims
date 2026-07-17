@@ -3,8 +3,9 @@ import { ethers } from 'ethers';
 import { EclaimContractService } from './eclaim-contract.service';
 import { ProviderRegistryService } from './provider-registry.service';
 import { VerifiableRegistryService } from './verifiable-registry.service';
+import { getActiveChain } from './chain-config';
 
-const RPC_URL = process.env.SPEARHEAD_RPC_URL || 'https://rpc.spearhead.adifoundation.ai';
+const RPC_URL = getActiveChain().rpcUrl;
 
 const DEMO = {
   providerId: 'FID-35-108719-7',

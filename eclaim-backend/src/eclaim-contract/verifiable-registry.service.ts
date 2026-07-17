@@ -6,8 +6,10 @@ import {
 import { ethers } from 'ethers';
 import * as ABI from './VERIFIABLE_REGISTRY.json';
 import { txHashFromReceipt } from './tx-receipt.util';
+import { getActiveChain } from './chain-config';
+import { waitAndAudit } from './tx-audit-log';
 
-const RPC_URL = process.env.SPEARHEAD_RPC_URL || 'https://rpc.spearhead.adifoundation.ai';
+const RPC_URL = getActiveChain().rpcUrl;
 
 export type RegistryKind = 'citizen' | 'clinician' | 'insurer';
 
@@ -232,28 +234,44 @@ export class VerifiableRegistryService {
     const to = Math.floor(new Date(body.validTo).getTime() / 1000);
     const contract = this.connected(kind);
     const tx = await contract.register(h(body.id), h(body.meta || ''), from, to);
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit(`${kind}.register`, tx, this.provider, {
+      contractName: 'VerifiableRegistry',
+      contractAddress: this.addressFor(kind),
+      extra: { kind, id: body.id },
+    });
     return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
   }
 
   async suspend(kind: RegistryKind, id: string) {
     const contract = this.connected(kind);
     const tx = await contract.suspend(h(id));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit(`${kind}.suspend`, tx, this.provider, {
+      contractName: 'VerifiableRegistry',
+      contractAddress: this.addressFor(kind),
+      extra: { kind, id },
+    });
     return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 
   async reactivate(kind: RegistryKind, id: string) {
     const contract = this.connected(kind);
     const tx = await contract.reactivate(h(id));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit(`${kind}.reactivate`, tx, this.provider, {
+      contractName: 'VerifiableRegistry',
+      contractAddress: this.addressFor(kind),
+      extra: { kind, id },
+    });
     return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 
   async deregister(kind: RegistryKind, id: string) {
     const contract = this.connected(kind);
     const tx = await contract.deregister(h(id));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit(`${kind}.deregister`, tx, this.provider, {
+      contractName: 'VerifiableRegistry',
+      contractAddress: this.addressFor(kind),
+      extra: { kind, id },
+    });
     return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 }

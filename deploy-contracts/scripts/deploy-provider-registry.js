@@ -1,24 +1,32 @@
+/**
+ * Deploy ProviderRegistry to the selected Hardhat network (--network spearhead|adi).
+ */
 import { network } from "hardhat";
+import { resolveNetwork } from "../networks.js";
+import { TxAuditLogger, deployAndLog } from "./lib/tx-logger.js";
 
-const { ethers } = await network.create();
+const connection = await network.create();
+const { ethers, networkName } = connection;
 
 async function main() {
-  console.log("ProviderRegistry deployment started..");
+  const netMeta = resolveNetwork(networkName);
+  const [signer] = await ethers.getSigners();
+  const deployer = await signer.getAddress();
+  const balance = await ethers.provider.getBalance(deployer);
 
-  const registry = await ethers.deployContract("ProviderRegistry");
-  const deploymentTx = registry.deploymentTransaction();
+  const logger = new TxAuditLogger(netMeta, { scriptName: "deploy-provider-registry" });
+  logger.logSessionStart(deployer, balance);
 
-  if (deploymentTx) {
-    console.log("deployment tx hash:", deploymentTx.hash);
-  }
+  console.log(`Deploying ProviderRegistry on ${netMeta.name} (chain ${netMeta.chainId})…`);
 
-  await registry.waitForDeployment();
-
-  const contractAddress = await registry.getAddress();
-  const owner = await registry.owner();
-
-  console.log("ProviderRegistry deployed to:", contractAddress);
+  const { contract, address } = await deployAndLog(ethers, logger, "ProviderRegistry");
+  const owner = await contract.owner();
   console.log("owner:", owner);
+
+  logger.logSessionEnd(await ethers.provider.getBalance(deployer));
+
+  console.log("\nSet in backend env:");
+  console.log(`PROVIDER_REGISTRY_ADDRESS=${address}`);
 }
 
 main().catch((error) => {

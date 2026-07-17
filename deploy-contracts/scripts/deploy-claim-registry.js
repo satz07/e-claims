@@ -1,26 +1,35 @@
+/**
+ * Deploy ClaimRegistry to the selected Hardhat network (--network spearhead|adi).
+ * Gas / fee details are appended under deploy-contracts/logs/.
+ */
 import { network } from "hardhat";
+import { resolveNetwork } from "../networks.js";
+import { TxAuditLogger, deployAndLog } from "./lib/tx-logger.js";
 
-const { ethers } = await network.create();
+const connection = await network.create();
+const { ethers, networkName } = connection;
 
 async function main() {
-  console.log("ClaimRegistry deployment started..");
+  const netMeta = resolveNetwork(networkName);
+  const [signer] = await ethers.getSigners();
+  const deployer = await signer.getAddress();
+  const balance = await ethers.provider.getBalance(deployer);
 
-  const claimRegistry = await ethers.deployContract("ClaimRegistry");
-  const deploymentTx = claimRegistry.deploymentTransaction();
+  const logger = new TxAuditLogger(netMeta, { scriptName: "deploy-claim-registry" });
+  logger.logSessionStart(deployer, balance);
 
-  if (deploymentTx) {
-    console.log("deployment tx hash:", deploymentTx.hash);
-  }
+  console.log(`Deploying ClaimRegistry on ${netMeta.name} (chain ${netMeta.chainId})…`);
 
-  console.log("ClaimRegistry waiting for deployment..");
-
-  await claimRegistry.waitForDeployment();
-
-  const contractAddress = await claimRegistry.getAddress();
-  const owner = await claimRegistry.owner();
-
-  console.log("ClaimRegistry deployed to:", contractAddress);
+  const { contract, address } = await deployAndLog(ethers, logger, "ClaimRegistry");
+  const owner = await contract.owner();
   console.log("owner:", owner);
+
+  const balanceAfter = await ethers.provider.getBalance(deployer);
+  logger.logSessionEnd(balanceAfter);
+
+  console.log("\nSet in backend / frontend env:");
+  console.log(`CHAIN_NETWORK=${netMeta.key}`);
+  console.log(`CLAIM_REGISTRY_ADDRESS=${address}`);
 }
 
 main().catch((error) => {

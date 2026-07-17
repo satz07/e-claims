@@ -1,6 +1,7 @@
-node_modules
-artifacts
-cache
+logs/
 .env
-.claude
-1.txt
+cache/
+artifacts/
+typechain-types/
+coverage/
+deployed-*.json

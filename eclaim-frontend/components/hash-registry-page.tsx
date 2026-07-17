@@ -14,6 +14,7 @@ import {
   PROVIDER_REGISTRY_ADDRESS,
 } from "@/lib/provider-contracts"
 import { writeContractAndWait } from "@/lib/write-contract"
+import { ACTIVE_NETWORK, explorerTxUrl } from "@/lib/network"
 
 type Tab = "register" | "lookup" | "list"
 export type RegistryKind = "citizen" | "clinician" | "insurer" | "provider"
@@ -74,11 +75,11 @@ function SuccessBanner({ message, txHash }: { message: string; txHash?: string }
       {txHash && (
         <Button variant="outline" size="sm" asChild>
           <a
-            href={`https://explorer.spearhead.adifoundation.ai/tx/${txHash}`}
+            href={explorerTxUrl(txHash)}
             target="_blank"
             rel="noopener noreferrer"
           >
-            View on Spearhead explorer
+            View on {ACTIVE_NETWORK.shortName} explorer
           </a>
         </Button>
       )}

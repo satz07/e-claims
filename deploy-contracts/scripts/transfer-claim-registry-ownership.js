@@ -1,17 +1,20 @@
 /**
- * Transfer ClaimRegistry owner to a new address.
+ * Transfer ClaimRegistry ownership.
  *
- * Requires .env (same as deploy):
- *   PRIVATE_KEY or DEPLOYER_PRIVATE_KEY — must be the CURRENT owner wallet
- *   CLAIM_REGISTRY_ADDRESS — deployed contract (0x...)
- *   NEW_OWNER — address that will become owner (0x...)
+ * .env:
+ *   PRIVATE_KEY / DEPLOYER_PRIVATE_KEY — current owner
+ *   CLAIM_REGISTRY_ADDRESS
+ *   NEW_OWNER
  *
- * Run:
  *   npx hardhat run scripts/transfer-claim-registry-ownership.js --network spearhead
+ *   npx hardhat run scripts/transfer-claim-registry-ownership.js --network adi
  */
 import { network } from "hardhat";
+import { resolveNetwork } from "../networks.js";
+import { TxAuditLogger } from "./lib/tx-logger.js";
 
-const { ethers } = await network.create();
+const connection = await network.create();
+const { ethers, networkName } = connection;
 
 async function main() {
   const registry = process.env.CLAIM_REGISTRY_ADDRESS;
@@ -24,20 +27,36 @@ async function main() {
     throw new Error("Set NEW_OWNER to the new owner EOA or multisig (0x...)");
   }
 
+  const netMeta = resolveNetwork(networkName);
   const [signer] = await ethers.getSigners();
-  console.log("Caller (must be current owner):", await signer.getAddress());
+  const deployer = await signer.getAddress();
+  const balance = await ethers.provider.getBalance(deployer);
+
+  const logger = new TxAuditLogger(netMeta, {
+    scriptName: "transfer-claim-registry-ownership",
+  });
+  logger.logSessionStart(deployer, balance);
 
   const claimRegistry = await ethers.getContractAt("ClaimRegistry", registry, signer);
-
   const before = await claimRegistry.owner();
   console.log("Owner before:", before);
 
   const tx = await claimRegistry.transferOwnership(newOwner);
-  console.log("Tx:", tx.hash);
-  await tx.wait();
+  const receipt = await tx.wait();
+
+  await logger.logTransaction({
+    label: "transferOwnership",
+    contractName: "ClaimRegistry",
+    contractAddress: registry,
+    tx,
+    receipt,
+    provider: ethers.provider,
+  });
 
   const after = await claimRegistry.owner();
   console.log("Owner after:", after);
+
+  logger.logSessionEnd(await ethers.provider.getBalance(deployer));
 }
 
 main().catch((e) => {

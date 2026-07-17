@@ -1,6 +1,6 @@
 "use client"
 
-import { Search, Menu, X } from "lucide-react"
+import { Menu, X } from "lucide-react"
 import Image from "next/image"
 import { useState } from "react"
 import { Button } from "./ui/button"
@@ -72,13 +72,6 @@ export function Sidebar() {
           </button>
 
           <button
-            className={navItemClass("/browse")}
-            onClick={() => navigate("/browse")}
-          >
-            <span className="font-medium">Browse claims</span>
-          </button>
-
-          <button
             className={navItemClass("/citizen-registry")}
             onClick={() => navigate("/citizen-registry")}
           >
@@ -104,21 +97,6 @@ export function Sidebar() {
             onClick={() => navigate("/provider-registry")}
           >
             <span className="font-medium">Provider registry</span>
-          </button>
-
-          <button
-            className={navItemClass("/issue-claim")}
-            onClick={() => navigate("/issue-claim")}
-          >
-            <span className="font-medium">Issue Claim (demo)</span>
-          </button>
-
-          <button
-            className={navItemClass("/search")}
-            onClick={() => navigate("/search")}
-          >
-            <span className="font-medium">Search Claim</span>
-            <Search className="w-5 h-5" />
           </button>
         </nav>
       </aside>

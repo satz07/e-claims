@@ -2,8 +2,8 @@ export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_CLAIM_REGISTRY_ADDRESS 
   '0xA8eFbf955496518D6e3Cb10ABC90627671534088') as `0x${string}`
 
 /** On-chain owner for ClaimRegistry + all registries (only this wallet can write). */
-export const CONTRACT_OWNER_ADDRESS =
-  '0xCb01D9DEc076837eF915E0ffd8d9182264FC5FAE' as const
+export const CONTRACT_OWNER_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_OWNER_ADDRESS ||
+  '0xCb01D9DEc076837eF915E0ffd8d9182264FC5FAE') as `0x${string}`
 
 /** Minimal Claim struct — QA MIS FHIR profile only */
 export const UPSERT_CLAIM_ABI = [

@@ -3,7 +3,8 @@
 import { useSwitchChain, useChainId } from "wagmi"
 import { Button } from "@/components/ui/button"
 import { AlertTriangle } from "lucide-react"
-import { adiTestnet } from "../providers/web3-provider"
+import { activeChain } from "../providers/web3-provider"
+import { ACTIVE_NETWORK } from "@/lib/network"
 
 export function NetworkRequiredModal() {
     const chainId = useChainId()
@@ -18,20 +19,25 @@ export function NetworkRequiredModal() {
                 </div>
                 <p className="text-sm text-gray-600">
                     MetaMask is on chain <b>{chainId}</b>. E-claims requires{" "}
-                    <b>Spearhead Testnet (chain ID 99991)</b>.
+                    <b>
+                      {ACTIVE_NETWORK.name} (chain ID {ACTIVE_NETWORK.chainId})
+                    </b>
+                    .
                 </p>
                 <p className="text-xs text-gray-500">
-                    RPC: <code>https://rpc.spearhead.adifoundation.ai</code>
+                    RPC: <code>{ACTIVE_NETWORK.rpcUrl}</code>
                     <br />
-                    &quot;ADI Network&quot; in MetaMask is often a <em>different</em> chain — balance
-                    shows 0 even if you have ADI on Spearhead.
+                    Set <code>NEXT_PUBLIC_CHAIN_NETWORK=spearhead</code> or{" "}
+                    <code>adi</code> in the frontend env, then rebuild.
                 </p>
                 <Button
                     className="w-full"
                     disabled={isPending}
-                    onClick={() => switchChain({ chainId: adiTestnet.id })}
+                    onClick={() => switchChain({ chainId: activeChain.id })}
                 >
-                    {isPending ? "Switching…" : "Switch to Spearhead (99991)"}
+                    {isPending
+                      ? "Switching…"
+                      : `Switch to ${ACTIVE_NETWORK.shortName} (${ACTIVE_NETWORK.chainId})`}
                 </Button>
             </div>
         </div>

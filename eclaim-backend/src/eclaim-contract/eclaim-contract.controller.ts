@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Query, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, HttpCode, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { EclaimContractService } from './eclaim-contract.service';
 
@@ -30,30 +30,45 @@ export class EclaimContractController {
     return this.service.getAllClaims(Number(page), Number(size), recordUse);
   }
 
-  /** Cache plaintext form data submitted after MetaMask upsertClaim succeeds */
+  /** Cache FHIR metadata after client-side MetaMask upsertClaim succeeds */
   @Post('meta')
   @HttpCode(200)
   async cacheMeta(@Body() body: {
     claimNumber: number;
+    source?: 'fhir' | 'demo';
     claimId: string;
     claimType: string;
     recordUse?: 'claim' | 'preauthorization';
     fid?: string;
+    crId?: string;
+    schemeCode?: string;
+    facilityLevel?: string;
+    interventionCode?: string;
+    bundleId?: string;
+    ipsClaim?: boolean;
+    claimedTotal: string;
+    creationDate?: string;
     patientName?: string;
     providerName?: string;
     shaCode?: string;
-    claimedTotal: string;
   }) {
+    if (body.source === 'demo' || body.patientName || body.shaCode) {
+      throw new BadRequestException('Demo claim metadata is no longer accepted');
+    }
     this.service.cacheClaimMeta(Number(body.claimNumber), {
+      source: 'fhir',
       claimId: body.claimId,
       recordUse: body.recordUse ?? 'claim',
       claimType: body.claimType,
-      fid: body.fid ?? body.providerName ?? '',
-      patientName: body.patientName || '',
-      providerName: body.providerName || '',
-      shaCode: body.shaCode || '',
+      fid: body.fid ?? '',
+      crId: body.crId,
+      schemeCode: body.schemeCode,
+      facilityLevel: body.facilityLevel,
+      interventionCode: body.interventionCode,
+      bundleId: body.bundleId,
+      ipsClaim: body.ipsClaim,
       claimedTotal: body.claimedTotal || '0',
-      creationDate: new Date().toLocaleDateString('en-US'),
+      creationDate: body.creationDate || new Date().toISOString().slice(0, 10),
     });
     return { ok: true };
   }

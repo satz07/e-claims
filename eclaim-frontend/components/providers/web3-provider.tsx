@@ -6,41 +6,44 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { injected, walletConnect, coinbaseWallet } from "wagmi/connectors"
 import { useState, useEffect } from "react"
 import { createPublicClient, defineChain } from "viem"
+import {
+  ACTIVE_NETWORK,
+  NETWORK_GAS_OVERRIDES,
+} from "@/lib/network"
 
-export const SPEARHEAD_GAS_OVERRIDES = {
-  maxFeePerGas: BigInt("1000000000000"), // 1000 gwei
-  maxPriorityFeePerGas: BigInt("100000000000"), // 100 gwei
-}
+/** @deprecated use NETWORK_GAS_OVERRIDES — kept for existing imports */
+export const SPEARHEAD_GAS_OVERRIDES = NETWORK_GAS_OVERRIDES
 
-export const adiTestnet = defineChain({
-  id: 99991,
-  name: "Spearhead Testnet",
-  nativeCurrency: {
-    name: "ADI",
-    symbol: "ADI",
-    decimals: 18,
-  },
+export const activeChain = defineChain({
+  id: ACTIVE_NETWORK.chainId,
+  name: ACTIVE_NETWORK.name,
+  nativeCurrency: ACTIVE_NETWORK.currency,
   rpcUrls: {
+    default: { http: [ACTIVE_NETWORK.rpcUrl] },
+    public: { http: [ACTIVE_NETWORK.rpcUrl] },
+  },
+  blockExplorers: {
     default: {
-      http: ["https://rpc.spearhead.adifoundation.ai"],
-    },
-    public: {
-      http: ["https://rpc.spearhead.adifoundation.ai"],
+      name: `${ACTIVE_NETWORK.shortName} Explorer`,
+      url: ACTIVE_NETWORK.explorerUrl,
     },
   },
   fees: {
-    defaultPriorityFee: () => SPEARHEAD_GAS_OVERRIDES.maxPriorityFeePerGas,
+    defaultPriorityFee: () => NETWORK_GAS_OVERRIDES.maxPriorityFeePerGas,
   },
 })
 
+/** @deprecated use activeChain */
+export const adiTestnet = activeChain
+
 export const publicClient = createPublicClient({
-  chain: adiTestnet,
-  transport: http("https://rpc.spearhead.adifoundation.ai"),
+  chain: activeChain,
+  transport: http(ACTIVE_NETWORK.rpcUrl),
 })
 
 function makeConfig() {
   return createConfig({
-    chains: [adiTestnet],
+    chains: [activeChain],
     connectors: [
       injected(),
       walletConnect({
@@ -52,7 +55,7 @@ function makeConfig() {
       }),
     ],
     transports: {
-      [adiTestnet.id]: http("https://rpc.spearhead.adifoundation.ai"),
+      [activeChain.id]: http(ACTIVE_NETWORK.rpcUrl),
     },
     ssr: false,
   })

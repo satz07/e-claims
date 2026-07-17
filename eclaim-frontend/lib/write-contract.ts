@@ -1,8 +1,9 @@
 import {
   publicClient,
-  adiTestnet,
+  activeChain,
   SPEARHEAD_GAS_OVERRIDES,
 } from '@/components/providers/web3-provider'
+import { NETWORK_GAS_OVERRIDES, ACTIVE_NETWORK } from '@/lib/network'
 import { CONTRACT_OWNER_ADDRESS } from '@/lib/contracts'
 import type { Abi, ContractFunctionName } from 'viem'
 
@@ -19,6 +20,8 @@ const OWNER_ABI = [
 ] as const
 
 const METAMASK_TIMEOUT_MS = 180_000
+
+const gasOverrides = NETWORK_GAS_OVERRIDES ?? SPEARHEAD_GAS_OVERRIDES
 
 function shorten(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -49,7 +52,8 @@ async function assertOwnerWallet(account: `0x${string}`, contract: `0x${string}`
 }
 
 /**
- * Simulate + MetaMask sign + wait for receipt on Spearhead (99991).
+ * Simulate + MetaMask sign + wait for receipt on the configured chain
+ * (Spearhead 99991 or ADI Network 36900).
  */
 export async function writeContractAndWait(
   writeContractAsync: WriteContractAsync,
@@ -74,7 +78,7 @@ export async function writeContractAndWait(
       functionName,
       args,
       account,
-      chain: adiTestnet,
+      chain: activeChain,
     })
   } catch (simErr) {
     const reason = parseRevertReason(simErr)
@@ -90,8 +94,8 @@ export async function writeContractAndWait(
     functionName,
     args,
     account,
-    maxFeePerGas: SPEARHEAD_GAS_OVERRIDES.maxFeePerGas,
-    maxPriorityFeePerGas: SPEARHEAD_GAS_OVERRIDES.maxPriorityFeePerGas,
+    maxFeePerGas: gasOverrides.maxFeePerGas,
+    maxPriorityFeePerGas: gasOverrides.maxPriorityFeePerGas,
   })
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -116,7 +120,7 @@ export async function writeContractAndWait(
   })
 
   if (receipt.status === 'reverted') {
-    throw new Error('Transaction reverted on Spearhead after mining.')
+    throw new Error(`Transaction reverted on ${ACTIVE_NETWORK.shortName} after mining.`)
   }
 
   return hash

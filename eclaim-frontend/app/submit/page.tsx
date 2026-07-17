@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { buildFullQaMisSample } from "@/lib/qa-mis-full-sample"
 import { randomUuid } from "@/lib/utils"
 import { CONTRACT_ADDRESS, CONTRACT_OWNER_ADDRESS, UPSERT_CLAIM_ABI } from "@/lib/contracts"
+import { ACTIVE_NETWORK, explorerTxUrl } from "@/lib/network"
 import { claimStructTuple, type PreparedClaimStruct } from "@/lib/claim-struct"
 import { writeContractAndWait } from "@/lib/write-contract"
 
@@ -131,6 +132,21 @@ export default function SubmitFhirPage() {
         args: [claimStructTuple(claimStruct)],
       }, address)
 
+      const metaRes = await fetch(`${base}/api/public/eclaim-contract/meta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          claimNumber: Number(claimStruct.claimNumber),
+          source: "fhir",
+          ...(prepared.meta ?? {}),
+          claimedTotal: prepared.claimedTotal,
+        }),
+      })
+      if (!metaRes.ok) {
+        const metaErr = await metaRes.json().catch(() => ({}))
+        throw new Error(metaErr?.message || "Claim anchored but metadata cache failed")
+      }
+
       setResult({
         recordUse: prepared.recordUse,
         claimId: prepared.claimId,
@@ -158,7 +174,7 @@ export default function SubmitFhirPage() {
           <code className="text-xs">Claim.use</code> = <strong>claim</strong> or{" "}
           <strong>preauthorization</strong>. Connect MetaMask as contract owner{" "}
           <code className="text-xs">{CONTRACT_OWNER_ADDRESS.slice(0, 6)}…{CONTRACT_OWNER_ADDRESS.slice(-4)}</code>{" "}
-          on <strong>Spearhead (99991)</strong> — other accounts cannot write.
+          on <strong>{ACTIVE_NETWORK.shortName} ({ACTIVE_NETWORK.chainId})</strong> — other accounts cannot write.
         </p>
       </div>
 
@@ -200,7 +216,7 @@ export default function SubmitFhirPage() {
           ? isTxPending
             ? "Confirm in MetaMask…"
             : "Waiting for confirmation…"
-          : "Anchor on Spearhead"}
+          : "Anchor on Chain"}
       </Button>
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
@@ -216,15 +232,15 @@ export default function SubmitFhirPage() {
           <p className="break-all"><strong>bundleHash:</strong> {result.bundleHash}</p>
           <div className="flex flex-wrap gap-2 pt-2">
             <Button variant="outline" size="sm" asChild>
-              <Link href="/browse">View on browse claims</Link>
+              <Link href="/">View claims</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
               <a
-                href={`https://explorer.spearhead.adifoundation.ai/tx/${result.txHash}`}
+                href={explorerTxUrl(result.txHash)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                View on Spearhead explorer
+                View on {ACTIVE_NETWORK.shortName} explorer
               </a>
             </Button>
           </div>

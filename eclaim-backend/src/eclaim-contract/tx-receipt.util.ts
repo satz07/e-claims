@@ -1,8 +1,7 @@
-import { ethers } from 'ethers';
-
 /** ethers v6 receipts expose `.hash`; v5 used `.transactionHash`. */
 export function txHashFromReceipt(
-  receipt: ethers.ContractTransactionReceipt,
+  receipt: { hash?: string; transactionHash?: string } | null | undefined,
 ): string {
-  return receipt.hash ?? (receipt as { transactionHash?: string }).transactionHash ?? '';
+  if (!receipt) return '';
+  return receipt.hash ?? receipt.transactionHash ?? '';
 }

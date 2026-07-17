@@ -6,10 +6,13 @@ import {
 import { ethers } from 'ethers';
 import * as ABI from './PROVIDER_REGISTRY.json';
 import { txHashFromReceipt } from './tx-receipt.util';
+import { getActiveChain } from './chain-config';
+import { waitAndAudit } from './tx-audit-log';
 
 const PROVIDER_REGISTRY_ADDRESS =
+  process.env.PROVIDER_REGISTRY_ADDRESS ||
   '0xeda747a951502878079a789DA5D3380dA6Ec2276';
-const RPC_URL = 'https://rpc.spearhead.adifoundation.ai';
+const RPC_URL = getActiveChain().rpcUrl;
 
 const STATUS_MAP: Record<number, string> = {
   0: 'registered',
@@ -243,7 +246,11 @@ export class ProviderRegistryService {
       licenseFrom,
       licenseTo,
     );
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('registerProvider', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId: body.providerId },
+    });
 
     return { txHash: txHashFromReceipt(receipt), providerId: body.providerId };
   }
@@ -251,21 +258,33 @@ export class ProviderRegistryService {
   async deregisterProvider(providerId: string) {
     const contract = this.connectedContract();
     const tx = await contract.deregisterProvider(this.providerIdHash(providerId));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('deregisterProvider', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId },
+    });
     return { txHash: txHashFromReceipt(receipt), providerId };
   }
 
   async suspendProvider(providerId: string) {
     const contract = this.connectedContract();
     const tx = await contract.suspendProvider(this.providerIdHash(providerId));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('suspendProvider', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId },
+    });
     return { txHash: txHashFromReceipt(receipt), providerId };
   }
 
   async reactivateProvider(providerId: string) {
     const contract = this.connectedContract();
     const tx = await contract.reactivateProvider(this.providerIdHash(providerId));
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('reactivateProvider', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId },
+    });
     return { txHash: txHashFromReceipt(receipt), providerId };
   }
 
@@ -282,7 +301,11 @@ export class ProviderRegistryService {
       from,
       to,
     );
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('updateLicense', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId },
+    });
     return { txHash: txHashFromReceipt(receipt), providerId };
   }
 
@@ -292,7 +315,11 @@ export class ProviderRegistryService {
       this.providerIdHash(providerId),
       h(level),
     );
-    const receipt = await tx.wait();
+    const receipt = await waitAndAudit('setProviderTier', tx, this.provider, {
+      contractName: 'ProviderRegistry',
+      contractAddress: PROVIDER_REGISTRY_ADDRESS,
+      extra: { providerId, level },
+    });
     return { txHash: txHashFromReceipt(receipt), providerId, level };
   }
 

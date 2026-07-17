@@ -16,13 +16,16 @@ import {
 import { txHashFromReceipt } from './tx-receipt.util';
 import { ProviderRegistryService } from './provider-registry.service';
 import { VerifiableRegistryService } from './verifiable-registry.service';
+import { getActiveChain } from './chain-config';
+import { logChainTransaction } from './tx-audit-log';
 
 const META_FILE = path.join(process.cwd(), 'claim-meta.json');
 
+const ACTIVE_CHAIN = getActiveChain();
 const CONTRACT_ADDRESS =
   process.env.CLAIM_REGISTRY_ADDRESS ||
   '0xA8eFbf955496518D6e3Cb10ABC90627671534088';
-const RPC_URL = process.env.SPEARHEAD_RPC_URL || 'https://rpc.spearhead.adifoundation.ai';
+const RPC_URL = ACTIVE_CHAIN.rpcUrl;
 
 const STATUS_MAP: Record<number, string> = {
   0: 'unknown',
@@ -41,13 +44,20 @@ function h(s: string): string {
   return ethers.keccak256(ethers.toUtf8Bytes(s));
 }
 
-interface ClaimMeta {
+export interface ClaimMeta {
+  source?: 'fhir' | 'demo';
   claimId: string;
   recordUse: RecordUse;
   claimType: string;
   fid: string;
   claimedTotal: string;
   creationDate: string;
+  crId?: string;
+  schemeCode?: string;
+  facilityLevel?: string;
+  interventionCode?: string;
+  bundleId?: string;
+  ipsClaim?: boolean;
   /** @deprecated legacy demo fields */
   patientName?: string;
   providerName?: string;
@@ -76,12 +86,19 @@ export class EclaimContractService {
         for (const [k, v] of Object.entries(raw)) {
           const m = v as Partial<ClaimMeta>;
           this.metaCache.set(Number(k), {
+            source: m.source ?? (m.patientName || m.shaCode ? 'demo' : 'fhir'),
             claimId: m.claimId ?? '',
             recordUse: m.recordUse ?? 'claim',
             claimType: m.claimType ?? '',
             fid: m.fid ?? m.providerName ?? '',
             claimedTotal: m.claimedTotal ?? '0',
             creationDate: m.creationDate ?? '',
+            crId: m.crId,
+            schemeCode: m.schemeCode,
+            facilityLevel: m.facilityLevel,
+            interventionCode: m.interventionCode,
+            bundleId: m.bundleId,
+            ipsClaim: m.ipsClaim,
             patientName: m.patientName,
             providerName: m.providerName,
             shaCode: m.shaCode,
@@ -100,8 +117,53 @@ export class EclaimContractService {
   }
 
   cacheClaimMeta(claimNumber: number, meta: ClaimMeta) {
-    this.metaCache.set(claimNumber, meta);
+    this.metaCache.set(claimNumber, { ...meta, source: meta.source ?? 'fhir' });
     this.saveMetaToDisk();
+  }
+
+  private formatUnix(ts: bigint | number | string | undefined): string {
+    const n = Number(ts ?? 0);
+    if (!n) return '—';
+    return new Date(n * 1000).toISOString().slice(0, 10);
+  }
+
+  private isDemoMeta(meta?: ClaimMeta): boolean {
+    if (!meta) return false;
+    if (meta.source === 'demo') return true;
+    return !!(meta.patientName || meta.shaCode);
+  }
+
+  private isFhirOnChain(claim: any): boolean {
+    const flh = claim?.facilityLevelHash;
+    return !!flh && flh !== ZERO_HASH;
+  }
+
+  private isFhirClaim(claimNumber: number, meta?: ClaimMeta, claim?: any): boolean {
+    if (this.isDemoMeta(meta)) return false;
+    if (meta?.source === 'fhir') return true;
+    if (claim && this.isFhirOnChain(claim)) return true;
+    if (meta && meta.claimType === 'institutional' && !meta.patientName && !meta.shaCode) {
+      return true;
+    }
+    return false;
+  }
+
+  private fhirMetaFromParsed(parsed: ReturnType<typeof parseFhirBundle>): ClaimMeta {
+    return {
+      source: 'fhir',
+      claimId: parsed.claimId,
+      recordUse: parsed.recordUse,
+      claimType: parsed.claimType,
+      fid: parsed.fid,
+      claimedTotal: parsed.claimedTotal.toString(),
+      creationDate: this.formatUnix(parsed.creationDate),
+      crId: parsed.crId,
+      schemeCode: parsed.schemeCode,
+      facilityLevel: parsed.facilityLevel,
+      interventionCode: parsed.interventionCode,
+      bundleId: parsed.bundleId,
+      ipsClaim: parsed.ipsClaim,
+    };
   }
 
   private ownerAddressCache: string | null = null;
@@ -132,12 +194,16 @@ export class EclaimContractService {
       recordUse: meta?.recordUse || '—',
       claimType: meta?.claimType || '—',
       fid: meta?.fid || '—',
+      crId: meta?.crId || '—',
+      schemeCode: meta?.schemeCode || '—',
+      facilityLevel: meta?.facilityLevel || '—',
+      interventionCode: meta?.interventionCode || '—',
+      bundleId: meta?.bundleId || '—',
+      ipsClaim: meta?.ipsClaim ?? claim.ipsClaim ?? false,
       claimedTotal: claim.claimedTotal.toString(),
-      approvedTotal: '—',
-      status: STATUS_MAP[Number(claim.status)] || 'unknown',
-      dateFrom: claim.dateFrom.toString(),
-      dateTo: claim.dateTo.toString(),
-      creationDate: meta?.creationDate || '—',
+      dateFrom: this.formatUnix(claim.dateFrom),
+      dateTo: this.formatUnix(claim.dateTo),
+      creationDate: meta?.creationDate || this.formatUnix(claim.creationDate),
       bundleHash: claim.bundleContentHash ?? claim.shaPackageCodeHash,
     };
   }
@@ -169,7 +235,7 @@ export class EclaimContractService {
     const required = gasPrice * gasLimit;
     if (balance < required) {
       throw new BadRequestException(
-        `Insufficient ADI for gas on ${address}. Balance: ${ethers.formatEther(balance)} ADI, need ~${ethers.formatEther(required)} ADI. Top up the owner wallet on Spearhead.`,
+        `Insufficient ADI for gas on ${address}. Balance: ${ethers.formatEther(balance)} ADI, need ~${ethers.formatEther(required)} ADI. Top up the owner wallet on ${ACTIVE_CHAIN.shortName}.`,
       );
     }
   }
@@ -178,9 +244,12 @@ export class EclaimContractService {
     return this.ownerAddressForReads().then(async (ownerAddress) => {
       const network = await this.provider.getNetwork();
       return {
-        network: 'Spearhead L3',
+        network: ACTIVE_CHAIN.name,
+        networkKey: ACTIVE_CHAIN.key,
         chainId: Number(network.chainId),
         rpcUrl: RPC_URL,
+        explorerUrl: ACTIVE_CHAIN.explorerUrl,
+        protocolVersion: ACTIVE_CHAIN.protocolVersion ?? null,
         claimRegistryAddress: CONTRACT_ADDRESS,
         providerRegistryAddress:
           process.env.PROVIDER_REGISTRY_ADDRESS ||
@@ -316,6 +385,7 @@ export class EclaimContractService {
       fid: parsed.fid,
       bundleHash: parsed.bundleContentHash,
       claimedTotal: parsed.claimedTotal.toString(),
+      meta: this.fhirMetaFromParsed(parsed),
     };
   }
 
@@ -339,14 +409,23 @@ export class EclaimContractService {
     const tx = await contractWithSigner.upsertClaim(claimStruct);
     const receipt = await tx.wait();
 
-    this.cacheClaimMeta(Number(claimNumber), {
-      claimId: parsed.claimId,
-      recordUse: parsed.recordUse,
-      claimType: parsed.claimType,
-      fid: parsed.fid,
-      claimedTotal: parsed.claimedTotal.toString(),
-      creationDate: new Date().toISOString(),
+    await logChainTransaction({
+      label: 'submitFhirBundle / upsertClaim',
+      contractName: 'ClaimRegistry',
+      contractAddress: CONTRACT_ADDRESS,
+      tx,
+      receipt,
+      provider: this.provider,
+      extra: {
+        claimNumber: claimNumber.toString(),
+        claimId: parsed.claimId,
+        recordUse: parsed.recordUse,
+        fid: parsed.fid,
+        claimedTotal: parsed.claimedTotal.toString(),
+      },
     });
+
+    this.cacheClaimMeta(Number(claimNumber), this.fhirMetaFromParsed(parsed));
 
     return {
       txHash: receipt.hash,
@@ -363,8 +442,12 @@ export class EclaimContractService {
     try {
       const claim = await this.ownerStaticCall('getClaim', claimNumber);
       const meta = this.metaCache.get(claimNumber);
+      if (!this.isFhirClaim(claimNumber, meta, claim)) {
+        throw new NotFoundException(`Claim ${claimNumber} not found`);
+      }
       return this.mapClaimStruct(claim, meta);
     } catch (error: any) {
+      if (error instanceof NotFoundException) throw error;
       if (error?.code === 'CALL_EXCEPTION') {
         throw new NotFoundException(`Claim ${claimNumber} not found`);
       }
@@ -395,18 +478,11 @@ export class EclaimContractService {
   }
 
   async getClaimByClaimId(claimId: string) {
-    const claimIdHash = h(claimId);
-    let claimNumber = await this.findClaimNumberByIdHash(claimIdHash);
-
-    // Fallback: treat input as an on-chain claimNumber if it looks numeric
-    if (claimNumber === null && /^\d+$/.test(claimId)) {
-      const n = Number(claimId);
-      try {
-        return await this.getClaim(n);
-      } catch {
-        // fall through to not-found
-      }
+    if (!claimId?.trim()) {
+      throw new BadRequestException('claimId is required');
     }
+    const claimIdHash = h(claimId);
+    const claimNumber = await this.findClaimNumberByIdHash(claimIdHash);
 
     if (claimNumber === null) {
       throw new NotFoundException(`No claim found for claimId "${claimId}"`);
@@ -456,12 +532,19 @@ export class EclaimContractService {
         }
       }
 
-      const total = ordered.length;
-      const totalPages = Math.ceil(total / size) || 1;
+      const fhirOrdered: number[] = [];
+      for (const n of ordered) {
+        const meta = this.metaCache.get(n);
+        if (this.isDemoMeta(meta)) continue;
+        if (!meta?.claimId?.trim()) continue;
+        if (meta.source === 'fhir' || (meta.claimType === 'institutional' && !meta.patientName)) {
+          fhirOrdered.push(n);
+        }
+      }
 
       const filteredOrdered = recordUse
-        ? ordered.filter((n) => this.metaCache.get(n)?.recordUse === recordUse)
-        : ordered;
+        ? fhirOrdered.filter((n) => this.metaCache.get(n)?.recordUse === recordUse)
+        : fhirOrdered;
       const filteredTotal = filteredOrdered.length;
       const filteredPages = Math.ceil(filteredTotal / size) || 1;
       const sliceIds = filteredOrdered.slice(page * size, page * size + size);
@@ -479,9 +562,13 @@ export class EclaimContractService {
               recordUse: meta?.recordUse || '—',
               claimType: meta?.claimType || '—',
               fid: meta?.fid || '—',
+              crId: meta?.crId || '—',
+              schemeCode: meta?.schemeCode || '—',
+              facilityLevel: meta?.facilityLevel || '—',
+              interventionCode: meta?.interventionCode || '—',
+              bundleId: meta?.bundleId || '—',
+              ipsClaim: meta?.ipsClaim ?? false,
               claimedTotal: meta?.claimedTotal || '—',
-              approvedTotal: '—',
-              status: 'unknown',
               dateFrom: '—',
               dateTo: '—',
               creationDate: meta?.creationDate || '—',
@@ -494,8 +581,8 @@ export class EclaimContractService {
       return {
         claims,
         page: {
-          totalPages: recordUse ? filteredPages : totalPages,
-          totalElements: recordUse ? filteredTotal : total,
+          totalPages: filteredPages,
+          totalElements: filteredTotal,
           size,
           number: page,
         },
@@ -511,6 +598,15 @@ export class EclaimContractService {
     const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
     const tx = await contractWithSigner.setClaimStatus(claimNumber, status);
     const receipt = await tx.wait();
+    await logChainTransaction({
+      label: 'setClaimStatus',
+      contractName: 'ClaimRegistry',
+      contractAddress: CONTRACT_ADDRESS,
+      tx,
+      receipt,
+      provider: this.provider,
+      extra: { claimNumber, status },
+    });
     return { txHash: txHashFromReceipt(receipt), claimNumber };
   }
 }
