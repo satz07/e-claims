@@ -130,6 +130,8 @@ export class EclaimContractService {
   private metaCache = new Map<number, ClaimMeta>();
   /** Serializes on-chain submits so nonces and claimNumbers stay ordered under concurrency. */
   private submitChainLock: Promise<void> = Promise.resolve();
+  /** Avoid re-scanning ClaimUpserted history on every submit; refreshed once then incremented. */
+  private lastClaimNumberCache: bigint | null = null;
 
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
@@ -410,14 +412,18 @@ export class EclaimContractService {
   }
 
   private async nextClaimNumber(): Promise<bigint> {
-    const events = await this.queryClaimUpsertedEvents();
-    let max = 0n;
-    for (const e of events) {
-      const n = BigInt(e.args.claimNumber);
-      if (n > max) max = n;
+    let max = this.lastClaimNumberCache ?? 0n;
+    if (this.lastClaimNumberCache == null) {
+      const events = await this.queryClaimUpsertedEvents();
+      for (const e of events) {
+        const n = BigInt(e.args.claimNumber);
+        if (n > max) max = n;
+      }
     }
     const candidate = BigInt(Date.now());
-    return candidate > max ? candidate : max + 1n;
+    const next = candidate > max ? candidate : max + 1n;
+    this.lastClaimNumberCache = next;
+    return next;
   }
 
   /** Validate facility + citizen + scheme against hash registries before gas spend. */
