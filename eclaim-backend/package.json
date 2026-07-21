@@ -23,7 +23,8 @@
     "typeorm": "npm run build && npx typeorm -d dist/database/typeorm.config.js",
     "migration:generate": "npm run typeorm -- migration:generate ./src/database/migrations/migration",
     "migration:run": "npm run typeorm -- migration:run",
-    "migration:revert": "npm run typeorm -- migration:revert"
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "seed:claims": "node scripts/generate-claims.mjs"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.29.1",

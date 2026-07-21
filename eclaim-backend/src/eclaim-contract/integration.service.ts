@@ -391,4 +391,75 @@ export class IntegrationService {
       claimResults,
     };
   }
+
+  /** Create N more claim/preauth anchors randomly across the 5 demo facilities. */
+  async seedRandomAnchors(count = 45) {
+    const n = Math.min(200, Math.max(1, Number(count) || 45));
+    const entities = Array.from({ length: 5 }, (_, i) => {
+      const idx = i + 1;
+      if (idx === 1) {
+        return {
+          providerId: DEMO.providerId,
+          providerName: DEMO.providerName,
+          level: DEMO.level,
+          crId: DEMO.crId,
+          schemeCode: DEMO.schemeCode,
+        };
+      }
+      return {
+        providerId: `FID-DEMO-${pad(idx)}`,
+        providerName: HOSPITALS[i] || `DEMO HOSPITAL ${idx}`,
+        level: LEVELS[i] || 'LEVEL 4',
+        crId: `CR-DEMO-${pad(idx)}`,
+        schemeCode: `CAT-DEMO-${pad(idx)}`,
+      };
+    });
+
+    const results: Record<string, unknown>[] = [];
+    let claimOk = 0;
+    let preauthOk = 0;
+
+    for (let i = 0; i < n; i++) {
+      const e = entities[Math.floor(Math.random() * entities.length)];
+      const use: 'claim' | 'preauthorization' =
+        Math.random() < 0.5 ? 'claim' : 'preauthorization';
+      const claimId = randomUUID();
+      const amount = 2000 + Math.floor(Math.random() * 18000);
+      try {
+        const bundle = buildMinimalFhirBundle({
+          use,
+          claimId,
+          fid: e.providerId,
+          facilityName: e.providerName,
+          level: e.level,
+          crId: e.crId,
+          schemeCode: e.schemeCode,
+          amount,
+        });
+        const res = await this.claims.submitFhirBundle(bundle);
+        results.push({ type: use, providerId: e.providerId, ...res });
+        if (use === 'claim') claimOk++;
+        else preauthOk++;
+      } catch (err: any) {
+        results.push({
+          type: use,
+          providerId: e.providerId,
+          claimId,
+          error: err?.message || 'submit failed',
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      network: getActiveChain().key,
+      requested: n,
+      summary: {
+        claimsOk: claimOk,
+        preauthsOk: preauthOk,
+        errors: results.filter((r) => 'error' in r).length,
+      },
+      results,
+    };
+  }
 }

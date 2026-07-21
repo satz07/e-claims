@@ -1,4 +1,4 @@
-import { Controller, Get, Post } from '@nestjs/common';
+import { Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IntegrationService } from './integration.service';
 
@@ -21,5 +21,11 @@ export class IntegrationController {
   @Post('seed-bulk-demo')
   seedBulkDemo() {
     return this.service.seedBulkDemo();
+  }
+
+  /** Extra random claim/preauth anchors (default 45). Uses existing demo facilities. */
+  @Post('seed-random-claims')
+  seedRandomClaims(@Query('count') count?: string) {
+    return this.service.seedRandomAnchors(count ? Number(count) : 45);
   }
 }

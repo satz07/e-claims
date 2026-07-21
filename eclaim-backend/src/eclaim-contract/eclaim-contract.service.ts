@@ -54,15 +54,26 @@ const KNOWN_LABELS: string[] = [
   'CAT-SHA-001',
   'CMP-DEMO-001',
   'PMF-12-001',
+  'PMF-08-010',
+  'PMF-15-002',
+  'PMF-20-001',
+  'PMF-11-003',
+  'PMF-09-004',
+  'PMF-14-007',
+  'PMF-18-001',
+  'PMF-07-002',
+  'PMF-22-005',
   'LEVEL 2',
   'LEVEL 3',
   'LEVEL 4',
   'LEVEL 5',
   'LEVEL 6',
-  ...[2, 3, 4, 5].flatMap((i) => {
-    const p = String(i).padStart(3, '0');
-    return [`FID-DEMO-${p}`, `CR-DEMO-${p}`, `CAT-DEMO-${p}`, `CMP-DEMO-${p}`];
-  }),
+  ...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].flatMap(
+    (i) => {
+      const p = String(i).padStart(3, '0');
+      return [`FID-SCALE-${p}`, `CR-SCALE-${p}`, `CAT-SCALE-${p}`, `CMP-SCALE-${p}`];
+    },
+  ),
 ];
 
 const HASH_TO_LABEL = new Map<string, string>(
