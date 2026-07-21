@@ -229,6 +229,7 @@ export class EclaimContractService {
   }
 
   private ownerAddressCache: string | null = null;
+  private legacyOwnerAddressCache: string | null = null;
 
   private async ownerAddressForReads(): Promise<string> {
     if (this.ownerAddressCache) return this.ownerAddressCache;
@@ -242,6 +243,16 @@ export class EclaimContractService {
     } catch { /* fall through */ }
     this.ownerAddressCache = await this.contract.owner();
     return this.ownerAddressCache;
+  }
+
+  /** V1 getClaim is onlyOwner — must simulate as on-chain owner, not an authorized submitter. */
+  private async legacyOwnerAddressForReads(): Promise<string> {
+    if (this.legacyOwnerAddressCache) return this.legacyOwnerAddressCache;
+    if (!this.legacyContract) {
+      return this.ownerAddressForReads();
+    }
+    this.legacyOwnerAddressCache = await this.legacyContract.owner();
+    return this.legacyOwnerAddressCache;
   }
 
   private async ownerStaticCall(fn: string, ...args: any[]) {
@@ -555,7 +566,7 @@ export class EclaimContractService {
     // Try legacy contract
     if (this.legacyContract) {
       try {
-        const from = await this.ownerAddressForReads();
+        const from = await this.legacyOwnerAddressForReads();
         const raw = await this.legacyContract['getClaim'].staticCall(claimNumber, { from });
         const claim = this.normalizeV1Claim(raw);
         if (this.isFhirClaim(claimNumber, meta, claim)) {
@@ -669,7 +680,8 @@ export class EclaimContractService {
         } catch {
           if (this.legacyContract) {
             try {
-              const raw = await this.legacyContract['getClaim'].staticCall(n, { from });
+              const legacyFrom = await this.legacyOwnerAddressForReads();
+              const raw = await this.legacyContract['getClaim'].staticCall(n, { from: legacyFrom });
               return this.normalizeV1Claim(raw);
             } catch { /* not found */ }
           }
