@@ -128,6 +128,8 @@ export class EclaimContractService {
   /** Legacy (V1) contract — read-only for old data. Null when not configured. */
   private legacyContract: ethers.Contract | null;
   private metaCache = new Map<number, ClaimMeta>();
+  /** Serializes on-chain submits so nonces and claimNumbers stay ordered under concurrency. */
+  private submitChainLock: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
@@ -503,8 +505,18 @@ export class EclaimContractService {
     };
   }
 
+  private async withSubmitLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.submitChainLock.then(() => fn());
+    this.submitChainLock = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   /** Parse FHIR Bundle, anchor on ClaimRegistry (hashes only — no PII on-chain). */
-  async submitFhirBundle(raw: unknown) {
+  async submitFhirBundle(raw: unknown, opts?: { wait?: boolean }) {
+    const wait = opts?.wait !== false;
     const parsed = parseFhirBundle(raw);
     const isDuplicate = await this.checkDuplicate(parsed.claimId, parsed.recordUse);
     if (isDuplicate) {
@@ -513,43 +525,76 @@ export class EclaimContractService {
 
     await this.assertRegistriesAuthorize(parsed);
 
-    const claimNumber = await this.nextClaimNumber();
-    const claimStruct = buildClaimStruct(parsed, claimNumber);
+    return this.withSubmitLock(async () => {
+      const claimNumber = await this.nextClaimNumber();
+      const claimStruct = buildClaimStruct(parsed, claimNumber);
 
-    const signer = this.getSigner();
-    await this.assertSignerIsAuthorized(signer);
-    const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
-    await this.assertSufficientGas(signer, contractWithSigner, claimStruct);
-    const tx = await contractWithSigner.upsertClaim(claimStruct);
-    const receipt = await tx.wait();
+      const signer = this.getSigner();
+      await this.assertSignerIsAuthorized(signer);
+      const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
+      await this.assertSufficientGas(signer, contractWithSigner, claimStruct);
+      const tx = await contractWithSigner.upsertClaim(claimStruct);
 
-    await logChainTransaction({
-      label: 'submitFhirBundle / upsertClaim',
-      contractName: 'ClaimRegistry',
-      contractAddress: CONTRACT_ADDRESS,
-      tx,
-      receipt,
-      provider: this.provider,
-      extra: {
+      const meta = this.fhirMetaFromParsed(parsed);
+      this.cacheClaimMeta(Number(claimNumber), meta);
+
+      const base = {
+        txHash: tx.hash,
         claimNumber: claimNumber.toString(),
         claimId: parsed.claimId,
         recordUse: parsed.recordUse,
         fid: parsed.fid,
+        bundleHash: parsed.bundleContentHash,
         claimedTotal: parsed.claimedTotal.toString(),
-      },
+        pending: !wait,
+      };
+
+      if (!wait) {
+        void tx
+          .wait()
+          .then(async (receipt) => {
+            if (!receipt) return;
+            await logChainTransaction({
+              label: 'submitFhirBundle / upsertClaim',
+              contractName: 'ClaimRegistry',
+              contractAddress: CONTRACT_ADDRESS,
+              tx,
+              receipt,
+              provider: this.provider,
+              extra: {
+                claimNumber: claimNumber.toString(),
+                claimId: parsed.claimId,
+                recordUse: parsed.recordUse,
+                fid: parsed.fid,
+                claimedTotal: parsed.claimedTotal.toString(),
+              },
+            });
+          })
+          .catch((err) => {
+            console.error('[submitFhirBundle] async receipt failed', err?.message || err);
+          });
+        return base;
+      }
+
+      const receipt = await tx.wait();
+      await logChainTransaction({
+        label: 'submitFhirBundle / upsertClaim',
+        contractName: 'ClaimRegistry',
+        contractAddress: CONTRACT_ADDRESS,
+        tx,
+        receipt,
+        provider: this.provider,
+        extra: {
+          claimNumber: claimNumber.toString(),
+          claimId: parsed.claimId,
+          recordUse: parsed.recordUse,
+          fid: parsed.fid,
+          claimedTotal: parsed.claimedTotal.toString(),
+        },
+      });
+
+      return { ...base, txHash: receipt.hash, pending: false };
     });
-
-    this.cacheClaimMeta(Number(claimNumber), this.fhirMetaFromParsed(parsed));
-
-    return {
-      txHash: receipt.hash,
-      claimNumber: claimNumber.toString(),
-      claimId: parsed.claimId,
-      recordUse: parsed.recordUse,
-      fid: parsed.fid,
-      bundleHash: parsed.bundleContentHash,
-      claimedTotal: parsed.claimedTotal.toString(),
-    };
   }
 
   async getClaim(claimNumber: number) {

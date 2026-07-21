@@ -17,8 +17,11 @@ export class EclaimContractController {
   /** Anchor a FHIR R4 Bundle (Claim.use = claim | preauthorization). Backend signs chain tx. */
   @Post('submit')
   @HttpCode(201)
-  async submitFhir(@Body() body: Record<string, unknown>) {
-    return this.service.submitFhirBundle(body);
+  async submitFhir(
+    @Body() body: Record<string, unknown>,
+    @Query('wait') wait?: string,
+  ) {
+    return this.service.submitFhirBundle(body, { wait: wait !== 'false' });
   }
 
   @Get()

@@ -11,6 +11,8 @@
  * Usage (non-interactive):
  *   node scripts/generate-claims.mjs --claims 100 --preauths 50
  *   node scripts/generate-claims.mjs --claims 20 --preauths 20 --ensure-pool 10
+ *   node scripts/generate-claims.mjs --claims 500 --preauths 500 --concurrency 10
+ *   node scripts/generate-claims.mjs --claims 500 --preauths 500 --concurrency 6 --no-wait
  *
  * Pool file: logs/seed-registry-pool.json
  * Run log:   logs/bulk-seed-runs.log
@@ -217,12 +219,21 @@ function ask(rl, question, fallback) {
 }
 
 function parseArgs(argv) {
-  const out = { claims: null, preauths: null, ensurePool: 0, interactive: true };
+  const out = {
+    claims: null,
+    preauths: null,
+    ensurePool: 0,
+    concurrency: 1,
+    noWait: false,
+    interactive: true,
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--claims') out.claims = Number(argv[++i]);
     else if (a === '--preauths') out.preauths = Number(argv[++i]);
     else if (a === '--ensure-pool') out.ensurePool = Number(argv[++i]);
+    else if (a === '--concurrency') out.concurrency = Number(argv[++i]);
+    else if (a === '--no-wait') out.noWait = true;
     else if (a === '--yes' || a === '-y') out.interactive = false;
   }
   if (out.claims != null || out.preauths != null) out.interactive = false;
@@ -414,50 +425,64 @@ async function ensureMorePool(pool, extra) {
   return pool;
 }
 
-async function submitMany(use, count, pool) {
+async function submitMany(use, count, pool, concurrency = 1, noWait = false) {
   let ok = 0;
   let errors = 0;
+  let completed = 0;
+  let nextIndex = 0;
   const interventionsUsed = new Set();
   const periodsSample = [];
+  const submitPath = noWait
+    ? '/api/public/eclaim-contract/submit?wait=false'
+    : '/api/public/eclaim-contract/submit';
 
-  for (let i = 0; i < count; i++) {
-    const provider = pick(pool.providers);
-    const citizen = pick(pool.citizens);
-    const scheme = pick(pool.schemes);
-    const intervention = pick(INTERVENTIONS);
-    const period = randomPeriod();
-    const care = Math.random() < 0.65 ? 'ip' : 'op';
-    const amount = randInt(1200, 45000);
-    interventionsUsed.add(intervention.code);
-    if (periodsSample.length < 5) {
-      periodsSample.push(`${period.created}→${period.end.slice(0, 10)}`);
-    }
+  async function worker() {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= count) return;
 
-    const built = buildBundle({
-      use,
-      provider,
-      citizen,
-      scheme,
-      intervention,
-      amount,
-      period,
-      care,
-    });
+      const provider = pick(pool.providers);
+      const citizen = pick(pool.citizens);
+      const scheme = pick(pool.schemes);
+      const intervention = pick(INTERVENTIONS);
+      const period = randomPeriod();
+      const care = Math.random() < 0.65 ? 'ip' : 'op';
+      const amount = randInt(1200, 45000);
+      interventionsUsed.add(intervention.code);
+      if (periodsSample.length < 5) {
+        periodsSample.push(`${period.created}→${period.end.slice(0, 10)}`);
+      }
 
-    try {
-      await api('POST', '/api/public/eclaim-contract/submit', built.bundle);
-      ok++;
-    } catch (err) {
-      errors++;
-      if (errors <= 8 || errors % 25 === 0) {
-        console.error(`  [${use} ${i + 1}/${count}] ${err.message}`);
+      const built = buildBundle({
+        use,
+        provider,
+        citizen,
+        scheme,
+        intervention,
+        amount,
+        period,
+        care,
+      });
+
+      try {
+        await api('POST', submitPath, built.bundle);
+        ok++;
+      } catch (err) {
+        errors++;
+        if (errors <= 8 || errors % 25 === 0) {
+          console.error(`  [${use} ${i + 1}/${count}] ${err.message}`);
+        }
+      }
+
+      completed++;
+      if (completed % 25 === 0 || completed === count) {
+        console.log(`  ${use} progress ${completed}/${count} ok=${ok} err=${errors}`);
       }
     }
-
-    if ((i + 1) % 25 === 0 || i + 1 === count) {
-      console.log(`  ${use} progress ${i + 1}/${count} ok=${ok} err=${errors}`);
-    }
   }
+
+  const workers = Array.from({ length: Math.min(concurrency, count) }, () => worker());
+  await Promise.all(workers);
 
   return { ok, errors, interventionsUsed: [...interventionsUsed], periodsSample };
 }
@@ -467,6 +492,8 @@ async function main() {
   let claims = args.claims;
   let preauths = args.preauths;
   let ensurePool = args.ensurePool || 0;
+  let concurrency = args.concurrency || 1;
+  let noWait = args.noWait || false;
 
   console.log(`Backend: ${BACKEND}`);
   console.log(`Log:     ${LOG_FILE}`);
@@ -487,11 +514,15 @@ async function main() {
     ensurePool = Number(
       await ask(rl, 'Add how many NEW registry sets first (0 = use existing only)', 0),
     );
+    concurrency = Number(await ask(rl, 'How many submissions to run in parallel', 1));
+    const noWaitAns = await ask(rl, 'Broadcast without waiting for confirmation (y/n)', 'n');
+    noWait = noWaitAns.toLowerCase().startsWith('y');
     rl.close();
   }
 
   claims = Math.max(0, Math.min(100_000, Number(claims) || 0));
   preauths = Math.max(0, Math.min(100_000, Number(preauths) || 0));
+  concurrency = Math.max(1, Math.min(100, Number(concurrency) || 1));
   if (claims + preauths === 0) {
     console.error('Nothing to create (claims=0 and preauths=0).');
     process.exit(1);
@@ -511,14 +542,18 @@ async function main() {
     `backend    ${BACKEND}`,
     `rpc        ${RPC}`,
     `requested  claims=${claims} preauths=${preauths}`,
+    `concurrency  ${concurrency}`,
+    `noWait     ${noWait}`,
     `pool       providers=${pool.providers.length} citizens=${pool.citizens.length} schemes=${pool.schemes.length}`,
     `wallet     ${balBefore?.address || 'n/a'}`,
     `balanceBefore  ${balBefore?.adi ?? 'n/a'} ADI`,
   ]);
 
-  console.log(`\nCreating ${claims} claims + ${preauths} preauths…`);
-  const claimStats = await submitMany('claim', claims, pool);
-  const preauthStats = await submitMany('preauthorization', preauths, pool);
+  console.log(
+    `\nCreating ${claims} claims + ${preauths} preauths with concurrency=${concurrency}${noWait ? ' (no-wait)' : ''}…`,
+  );
+  const claimStats = await submitMany('claim', claims, pool, concurrency, noWait);
+  const preauthStats = await submitMany('preauthorization', preauths, pool, concurrency, noWait);
 
   const end = new Date();
   const balAfter = await getBalance();
