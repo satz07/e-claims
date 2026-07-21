@@ -10,6 +10,7 @@ import { txHashFromReceipt } from './tx-receipt.util';
 import { getActiveChain } from './chain-config';
 import { waitAndAudit } from './tx-audit-log';
 import { rememberId, resolveIdLabel } from './registry-id-labels';
+import { withChainWriteLock } from './chain-write-lock';
 
 const RPC_URL = getActiveChain().rpcUrl;
 
@@ -247,49 +248,57 @@ export class VerifiableRegistryService {
       validTo: string;
     },
   ) {
-    const from = Math.floor(new Date(body.validFrom).getTime() / 1000);
-    const to = Math.floor(new Date(body.validTo).getTime() / 1000);
-    const contract = this.connected(kind);
-    const tx = await contract.register(h(body.id), h(body.meta || ''), from, to);
-    const receipt = await waitAndAudit(`${kind}.register`, tx, this.provider, {
-      contractName: 'VerifiableRegistry',
-      contractAddress: this.addressFor(kind),
-      extra: { kind, id: body.id },
+    return withChainWriteLock(async () => {
+      const from = Math.floor(new Date(body.validFrom).getTime() / 1000);
+      const to = Math.floor(new Date(body.validTo).getTime() / 1000);
+      const contract = this.connected(kind);
+      const tx = await contract.register(h(body.id), h(body.meta || ''), from, to);
+      const receipt = await waitAndAudit(`${kind}.register`, tx, this.provider, {
+        contractName: 'VerifiableRegistry',
+        contractAddress: this.addressFor(kind),
+        extra: { kind, id: body.id },
+      });
+      rememberId(kind, body.id);
+      return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
     });
-    rememberId(kind, body.id);
-    return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
   }
 
   async suspend(kind: RegistryKind, id: string) {
-    const contract = this.connected(kind);
-    const tx = await contract.suspend(h(id));
-    const receipt = await waitAndAudit(`${kind}.suspend`, tx, this.provider, {
-      contractName: 'VerifiableRegistry',
-      contractAddress: this.addressFor(kind),
-      extra: { kind, id },
+    return withChainWriteLock(async () => {
+      const contract = this.connected(kind);
+      const tx = await contract.suspend(h(id));
+      const receipt = await waitAndAudit(`${kind}.suspend`, tx, this.provider, {
+        contractName: 'VerifiableRegistry',
+        contractAddress: this.addressFor(kind),
+        extra: { kind, id },
+      });
+      return { txHash: txHashFromReceipt(receipt), id, kind };
     });
-    return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 
   async reactivate(kind: RegistryKind, id: string) {
-    const contract = this.connected(kind);
-    const tx = await contract.reactivate(h(id));
-    const receipt = await waitAndAudit(`${kind}.reactivate`, tx, this.provider, {
-      contractName: 'VerifiableRegistry',
-      contractAddress: this.addressFor(kind),
-      extra: { kind, id },
+    return withChainWriteLock(async () => {
+      const contract = this.connected(kind);
+      const tx = await contract.reactivate(h(id));
+      const receipt = await waitAndAudit(`${kind}.reactivate`, tx, this.provider, {
+        contractName: 'VerifiableRegistry',
+        contractAddress: this.addressFor(kind),
+        extra: { kind, id },
+      });
+      return { txHash: txHashFromReceipt(receipt), id, kind };
     });
-    return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 
   async deregister(kind: RegistryKind, id: string) {
-    const contract = this.connected(kind);
-    const tx = await contract.deregister(h(id));
-    const receipt = await waitAndAudit(`${kind}.deregister`, tx, this.provider, {
-      contractName: 'VerifiableRegistry',
-      contractAddress: this.addressFor(kind),
-      extra: { kind, id },
+    return withChainWriteLock(async () => {
+      const contract = this.connected(kind);
+      const tx = await contract.deregister(h(id));
+      const receipt = await waitAndAudit(`${kind}.deregister`, tx, this.provider, {
+        contractName: 'VerifiableRegistry',
+        contractAddress: this.addressFor(kind),
+        extra: { kind, id },
+      });
+      return { txHash: txHashFromReceipt(receipt), id, kind };
     });
-    return { txHash: txHashFromReceipt(receipt), id, kind };
   }
 }

@@ -19,6 +19,7 @@ import { ProviderRegistryService } from './provider-registry.service';
 import { VerifiableRegistryService } from './verifiable-registry.service';
 import { getActiveChain } from './chain-config';
 import { logChainTransaction } from './tx-audit-log';
+import { withChainWriteLock } from './chain-write-lock';
 
 const META_FILE = path.join(process.cwd(), 'claim-meta.json');
 
@@ -128,8 +129,6 @@ export class EclaimContractService {
   /** Legacy (V1) contract — read-only for old data. Null when not configured. */
   private legacyContract: ethers.Contract | null;
   private metaCache = new Map<number, ClaimMeta>();
-  /** Serializes on-chain submits so nonces and claimNumbers stay ordered under concurrency. */
-  private submitChainLock: Promise<void> = Promise.resolve();
   /** Avoid re-scanning ClaimUpserted history on every submit; refreshed once then incremented. */
   private lastClaimNumberCache: bigint | null = null;
   /** Newest-first unique claim numbers from ClaimUpserted; avoids re-scan on every list page. */
@@ -591,12 +590,8 @@ export class EclaimContractService {
   }
 
   private async withSubmitLock<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.submitChainLock.then(() => fn());
-    this.submitChainLock = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    // Shared with citizen/provider register so one wallet never double-spends a nonce.
+    return withChainWriteLock(fn);
   }
 
   /** Parse FHIR Bundle, anchor on ClaimRegistry (hashes only — no PII on-chain). */
