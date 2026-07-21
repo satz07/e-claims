@@ -5,6 +5,8 @@
  *   logs/db-seed-progress.json   — lastClaimNumber / import totals (ONLY updated by --limit)
  *   logs/db-seed-registries.json — providers/schemes/citizens cache (--register-only safe)
  *   logs/db-seed-cursor.json     — combined snapshot for humans (rebuilt on save)
+ *   With --worker NAME (or --from/--to): progress/cursor/records/runs use *-NAME suffixes;
+ *   registries stay shared.
  * Run log:       logs/db-seed-runs.log
  * Record log:    logs/db-seed-records.log  (one line per claim)
  *
@@ -17,8 +19,14 @@
  *   node scripts/seed-from-db.mjs --limit 100 --use claim --no-wait
  *   node scripts/seed-from-db.mjs --limit 1000 --use both --no-wait
  *
+ *   # Multi-machine (disjoint claim_number ranges — no duplicates):
+ *   node scripts/seed-from-db.mjs --plan-workers 3
+ *   node scripts/seed-from-db.mjs --worker A --from 1 --to 100000 --limit 100 --no-wait
+ *   node scripts/seed-from-db.mjs --worker B --from 100001 --to 200000 --limit 100 --no-wait
+ *
  *   # Status / resume info
  *   node scripts/seed-from-db.mjs --status
+ *   node scripts/seed-from-db.mjs --worker A --from 1 --to 100000 --status
  *
  *   # Rebuild lastClaimNumber from logs/db-seed-records.log (keeps registries)
  *   node scripts/seed-from-db.mjs --rebuild-cursor
@@ -38,11 +46,42 @@ import { ethers } from 'ethers';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
-const CURSOR_FILE = path.join(root, 'logs', 'db-seed-cursor.json');
-const PROGRESS_FILE = path.join(root, 'logs', 'db-seed-progress.json');
-const REGISTRY_FILE = path.join(root, 'logs', 'db-seed-registries.json');
-const RUN_LOG = path.join(root, 'logs', 'db-seed-runs.log');
-const RECORD_LOG = path.join(root, 'logs', 'db-seed-records.log');
+const LOG_DIR = path.join(root, 'logs');
+const REGISTRY_FILE = path.join(LOG_DIR, 'db-seed-registries.json');
+
+/** Set by configureWorkerPaths() after parsing --worker / --from / --to. */
+let CURSOR_FILE = path.join(LOG_DIR, 'db-seed-cursor.json');
+let PROGRESS_FILE = path.join(LOG_DIR, 'db-seed-progress.json');
+let RUN_LOG = path.join(LOG_DIR, 'db-seed-runs.log');
+let RECORD_LOG = path.join(LOG_DIR, 'db-seed-records.log');
+let WORKER_ID = null;
+
+function sanitizeWorkerId(id) {
+  return String(id || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+function configureWorkerPaths(args) {
+  let id = sanitizeWorkerId(args.worker);
+  if (!id && args.from != null && args.to != null) {
+    id = sanitizeWorkerId(`${args.from}-${args.to}`);
+  }
+  WORKER_ID = id || null;
+  if (!WORKER_ID) {
+    CURSOR_FILE = path.join(LOG_DIR, 'db-seed-cursor.json');
+    PROGRESS_FILE = path.join(LOG_DIR, 'db-seed-progress.json');
+    RUN_LOG = path.join(LOG_DIR, 'db-seed-runs.log');
+    RECORD_LOG = path.join(LOG_DIR, 'db-seed-records.log');
+    return;
+  }
+  CURSOR_FILE = path.join(LOG_DIR, `db-seed-cursor-${WORKER_ID}.json`);
+  PROGRESS_FILE = path.join(LOG_DIR, `db-seed-progress-${WORKER_ID}.json`);
+  RUN_LOG = path.join(LOG_DIR, `db-seed-runs-${WORKER_ID}.log`);
+  RECORD_LOG = path.join(LOG_DIR, `db-seed-records-${WORKER_ID}.log`);
+}
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -169,11 +208,23 @@ function migrateLegacyCursorIfNeeded() {
   }
 }
 
-function loadProgress() {
+function loadProgress(range = {}) {
   migrateLegacyCursorIfNeeded();
   const p = readJson(PROGRESS_FILE, defaultProgress);
   p.totals = { ...defaultProgress().totals, ...(p.totals || {}) };
   p.lastClaimNumber = Number(p.lastClaimNumber) || 0;
+  // Worker range: start at (from - 1) so first row fetched is >= from
+  if (range.from != null) {
+    const floor = Number(range.from) - 1;
+    if (p.lastClaimNumber < floor) p.lastClaimNumber = floor;
+  }
+  if (range.from != null || range.to != null) {
+    p.range = {
+      from: range.from ?? null,
+      to: range.to ?? null,
+      worker: WORKER_ID,
+    };
+  }
   return p;
 }
 
@@ -182,14 +233,15 @@ function loadRegistries() {
   return deepMergeRegistered(defaultRegistries(), readJson(REGISTRY_FILE, defaultRegistries));
 }
 
-function loadCursor() {
-  const progress = loadProgress();
+function loadCursor(range = {}) {
+  const progress = loadProgress(range);
   const registered = loadRegistries();
   return {
     lastClaimNumber: progress.lastClaimNumber,
     lastClaimId: progress.lastClaimId,
     lastBundleId: progress.lastBundleId,
     lastImportedAt: progress.lastImportedAt,
+    range: progress.range || null,
     totals: {
       ...progress.totals,
       providersRegistered: Object.keys(registered.providers).length,
@@ -207,7 +259,9 @@ function saveRegistries(registered) {
 }
 
 function saveProgress(progress, { forceReset = false } = {}) {
-  const disk = loadProgress();
+  const disk = readJson(PROGRESS_FILE, defaultProgress);
+  disk.totals = { ...defaultProgress().totals, ...(disk.totals || {}) };
+  disk.lastClaimNumber = Number(disk.lastClaimNumber) || 0;
   if (forceReset) {
     writeJsonAtomic(PROGRESS_FILE, progress);
     return progress;
@@ -228,6 +282,7 @@ function saveProgress(progress, { forceReset = false } = {}) {
       errors: Math.max(disk.totals.errors || 0, progress.totals?.errors || 0),
       skipped: Math.max(disk.totals.skipped || 0, progress.totals?.skipped || 0),
     },
+    range: progress.range || disk.range || null,
   };
   if (!useMem) {
     merged.totals = { ...disk.totals };
@@ -250,6 +305,7 @@ function saveCursor(cursor, { forceReset = false, registriesOnly = false } = {})
         lastClaimId: cursor.lastClaimId,
         lastBundleId: cursor.lastBundleId,
         lastImportedAt: cursor.lastImportedAt,
+        range: cursor.range || null,
         totals: {
           claimsOk: cursor.totals?.claimsOk || 0,
           preauthsOk: cursor.totals?.preauthsOk || 0,
@@ -268,7 +324,7 @@ function saveCursor(cursor, { forceReset = false, registriesOnly = false } = {})
     };
   } else {
     // Keep in-memory progress fields from disk so UI object stays accurate
-    const progress = loadProgress();
+    const progress = loadProgress(cursor.range || {});
     cursor.lastClaimNumber = progress.lastClaimNumber;
     cursor.lastClaimId = progress.lastClaimId;
     cursor.lastBundleId = progress.lastBundleId;
@@ -289,6 +345,8 @@ function saveCursor(cursor, { forceReset = false, registriesOnly = false } = {})
     lastClaimId: cursor.lastClaimId,
     lastBundleId: cursor.lastBundleId,
     lastImportedAt: cursor.lastImportedAt,
+    range: cursor.range || null,
+    worker: WORKER_ID,
     totals: cursor.totals,
     registered: cursor.registered,
   });
@@ -606,6 +664,11 @@ function parseArgs(argv) {
     resetCursor: false,
     rebuildCursor: false,
     ensureRegistries: true,
+    from: null,
+    to: null,
+    worker: null,
+    planWorkers: null,
+    after: null,
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -618,12 +681,29 @@ function parseArgs(argv) {
     else if (a === '--reset-cursor') out.resetCursor = true;
     else if (a === '--rebuild-cursor') out.rebuildCursor = true;
     else if (a === '--skip-ensure-registries') out.ensureRegistries = false;
+    else if (a === '--from') out.from = Number(argv[++i]);
+    else if (a === '--to') out.to = Number(argv[++i]);
+    else if (a === '--worker') out.worker = String(argv[++i]);
+    else if (a === '--plan-workers') out.planWorkers = Number(argv[++i]);
+    else if (a === '--after') out.after = Number(argv[++i]);
   }
   out.limit = Math.max(1, Math.min(10_000, Number(out.limit) || 50));
   if (!['claim', 'preauthorization', 'both', 'preauth'].includes(out.use)) {
     out.use = 'both';
   }
   if (out.use === 'preauth') out.use = 'preauthorization';
+  if (out.from != null && (!Number.isFinite(out.from) || out.from < 1)) {
+    throw new Error('--from must be a positive claim_number');
+  }
+  if (out.to != null && (!Number.isFinite(out.to) || out.to < 1)) {
+    throw new Error('--to must be a positive claim_number');
+  }
+  if (out.from != null && out.to != null && out.from > out.to) {
+    throw new Error(`--from (${out.from}) must be <= --to (${out.to})`);
+  }
+  if (out.planWorkers != null && (!Number.isFinite(out.planWorkers) || out.planWorkers < 1)) {
+    throw new Error('--plan-workers must be >= 1');
+  }
   return out;
 }
 
@@ -633,7 +713,13 @@ function useFilterSql(use) {
   return `AND c.use IN ('Claim', 'Preauthorization')`;
 }
 
-async function fetchBatch(client, afterClaimNumber, limit, use) {
+async function fetchBatch(client, afterClaimNumber, limit, use, to = null) {
+  const params = [afterClaimNumber, limit];
+  let toClause = '';
+  if (to != null) {
+    params.push(to);
+    toClause = `AND c.claim_number <= $${params.length}`;
+  }
   const sql = `
     SELECT
       c.claim_number,
@@ -674,13 +760,14 @@ async function fetchBatch(client, afterClaimNumber, limit, use) {
       LIMIT 1
     ) ca ON true
     WHERE c.claim_number > $1
+      ${toClause}
       AND pr.fid_code IS NOT NULL AND pr.fid_code <> ''
       AND p.cr_id IS NOT NULL AND p.cr_id <> ''
       ${useFilterSql(use)}
     ORDER BY c.claim_number ASC
     LIMIT $2
   `;
-  const { rows } = await client.query(sql, [afterClaimNumber, limit]);
+  const { rows } = await client.query(sql, params);
   return rows;
 }
 
@@ -710,7 +797,13 @@ async function fetchRegistrySeeds(client) {
   return { providers, schemes };
 }
 
-async function printStatus(client, cursor) {
+async function printStatus(client, cursor, args = {}) {
+  const params = [cursor.lastClaimNumber];
+  let toClause = '';
+  if (args.to != null) {
+    params.push(args.to);
+    toClause = `AND c.claim_number <= $${params.length}`;
+  }
   const remaining = await client.query(`
     SELECT
       COUNT(*) FILTER (WHERE c.use = 'Claim') AS claims_left,
@@ -722,13 +815,19 @@ async function printStatus(client, cursor) {
     JOIN provider pr ON pr.id = c.provider
     JOIN patient p ON p.id = c.patient
     WHERE c.claim_number > $1
+      ${toClause}
       AND pr.fid_code IS NOT NULL AND pr.fid_code <> ''
       AND c.use IN ('Claim', 'Preauthorization')
-  `, [cursor.lastClaimNumber]);
+  `, params);
 
   const r = remaining.rows[0];
   console.log('── DB → on-chain import status ──');
-  console.log(`cursor file:     ${CURSOR_FILE}`);
+  if (WORKER_ID) console.log(`worker:         ${WORKER_ID}`);
+  if (args.from != null || args.to != null) {
+    console.log(`range:          ${args.from ?? '…'} → ${args.to ?? '…'}`);
+  }
+  console.log(`progress file:  ${PROGRESS_FILE}`);
+  console.log(`cursor file:    ${CURSOR_FILE}`);
   console.log(`lastClaimNumber: ${cursor.lastClaimNumber}`);
   console.log(`lastClaimId:     ${cursor.lastClaimId || '—'}`);
   console.log(`lastImportedAt:  ${cursor.lastImportedAt || '—'}`);
@@ -736,6 +835,87 @@ async function printStatus(client, cursor) {
   console.log(`registries:      providers=${Object.keys(cursor.registered.providers).length} schemes=${Object.keys(cursor.registered.schemes).length} citizens=${Object.keys(cursor.registered.citizens).length}`);
   console.log(`remaining:       claims=${r.claims_left} preauths=${r.preauths_left} total=${r.total_left}`);
   console.log(`next claim#:     ${r.next_claim_number ?? 'done'}`);
+  if (args.to != null && cursor.lastClaimNumber >= args.to) {
+    console.log('range complete:  lastClaimNumber >= --to');
+  }
+}
+
+/** Split remaining claim_number span into N disjoint worker ranges. */
+async function planWorkers(client, workerCount, after = null) {
+  const bounds = await client.query(`
+    SELECT
+      MIN(c.claim_number) AS min_n,
+      MAX(c.claim_number) AS max_n,
+      COUNT(*) AS usable
+    FROM claims c
+    JOIN provider pr ON pr.id = c.provider
+    JOIN patient p ON p.id = c.patient
+    WHERE pr.fid_code IS NOT NULL AND pr.fid_code <> ''
+      AND p.cr_id IS NOT NULL AND p.cr_id <> ''
+      AND c.use IN ('Claim', 'Preauthorization')
+  `);
+  const { min_n: minN, max_n: maxN, usable } = bounds.rows[0];
+  if (minN == null) {
+    console.log('No usable claims found in DB.');
+    return;
+  }
+
+  // Skip numbers already imported by the default single-machine cursor (if present)
+  let start = Number(minN);
+  if (after != null && Number.isFinite(after)) {
+    start = Math.max(start, Number(after) + 1);
+  } else {
+    const defaultProgressPath = path.join(LOG_DIR, 'db-seed-progress.json');
+    if (fs.existsSync(defaultProgressPath)) {
+      try {
+        const p = JSON.parse(fs.readFileSync(defaultProgressPath, 'utf8'));
+        const done = Number(p.lastClaimNumber) || 0;
+        if (done >= start) start = done + 1;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const end = Number(maxN);
+  if (start > end) {
+    console.log(`Nothing left to plan (start=${start} > max=${end}).`);
+    return;
+  }
+
+  const n = Math.max(1, Math.floor(workerCount));
+  const span = end - start + 1;
+  const chunk = Math.ceil(span / n);
+
+  console.log('── Multi-machine worker plan ──');
+  console.log(`DB usable rows:  ${usable}`);
+  console.log(`DB claim# span:  ${minN} → ${maxN}`);
+  console.log(`Plan remaining:  ${start} → ${end} (${span} claim_numbers)`);
+  console.log(`Workers:         ${n}  (~${chunk} claim_numbers each)`);
+  console.log('');
+  console.log('Assign one range per machine (ranges do not overlap):');
+  console.log('');
+
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for (let i = 0; i < n; i++) {
+    const from = start + i * chunk;
+    if (from > end) break;
+    const to = Math.min(end, from + chunk - 1);
+    const name = n <= 26 ? letters[i] : String(i + 1);
+    console.log(`# Machine ${name}`);
+    console.log(
+      `node scripts/seed-from-db.mjs --worker ${name} --from ${from} --to ${to} --limit 100 --no-wait`,
+    );
+    console.log(
+      `# status: node scripts/seed-from-db.mjs --worker ${name} --from ${from} --to ${to} --status`,
+    );
+    console.log('');
+  }
+  console.log('Notes:');
+  console.log('  • Run --register-only once first (shared registries).');
+  console.log('  • Each worker writes its own progress/records files.');
+  console.log('  • Do not reuse overlapping --from/--to across machines.');
+  console.log('  • Optional: --after N to ignore claim_numbers <= N when planning.');
 }
 
 async function registerOnly(client, cursor) {
@@ -771,12 +951,26 @@ async function importBatch(client, cursor, args) {
     ? '/api/public/eclaim-contract/submit?wait=false'
     : '/api/public/eclaim-contract/submit';
 
-  const rows = await fetchBatch(client, cursor.lastClaimNumber, args.limit, args.use);
+  const rows = await fetchBatch(
+    client,
+    cursor.lastClaimNumber,
+    args.limit,
+    args.use,
+    args.to,
+  );
+  const rangeLabel =
+    args.from != null || args.to != null
+      ? ` range=${args.from ?? '…'}→${args.to ?? '…'}`
+      : '';
   console.log(
-    `Fetched ${rows.length} row(s) after claim_number=${cursor.lastClaimNumber} use=${args.use}`,
+    `Fetched ${rows.length} row(s) after claim_number=${cursor.lastClaimNumber} use=${args.use}${rangeLabel}`,
   );
   if (rows.length === 0) {
-    console.log('Nothing left to import for this filter.');
+    console.log(
+      args.to != null && cursor.lastClaimNumber >= args.to
+        ? 'Range complete — nothing left in this worker slice.'
+        : 'Nothing left to import for this filter.',
+    );
     return;
   }
 
@@ -965,19 +1159,27 @@ async function importBatch(client, cursor, args) {
 
 async function main() {
   const args = parseArgs(process.argv);
+  configureWorkerPaths(args);
 
   if (args.resetCursor) {
     writeJsonAtomic(PROGRESS_FILE, defaultProgress());
-    writeJsonAtomic(REGISTRY_FILE, defaultRegistries());
-    writeJsonAtomic(CURSOR_FILE, loadCursor());
-    console.log(`Cursor HARD reset → ${PROGRESS_FILE} + ${REGISTRY_FILE}`);
-    console.log('Use --rebuild-cursor to restore progress from db-seed-records.log');
+    if (!WORKER_ID) {
+      writeJsonAtomic(REGISTRY_FILE, defaultRegistries());
+    }
+    writeJsonAtomic(CURSOR_FILE, loadCursor({ from: args.from, to: args.to }));
+    console.log(
+      WORKER_ID
+        ? `Worker ${WORKER_ID} progress HARD reset → ${PROGRESS_FILE}`
+        : `Cursor HARD reset → ${PROGRESS_FILE} + ${REGISTRY_FILE}`,
+    );
+    console.log('Use --rebuild-cursor to restore progress from the record log');
     return;
   }
 
   if (args.rebuildCursor) {
     const cursor = rebuildCursorFromRecords();
     console.log('Cursor rebuilt from record log:');
+    console.log(`  file=${PROGRESS_FILE}`);
     console.log(`  lastClaimNumber=${cursor.lastClaimNumber}`);
     console.log(`  lastClaimId=${cursor.lastClaimId}`);
     console.log(`  claimsOk=${cursor.totals.claimsOk} errors=${cursor.totals.errors}`);
@@ -990,35 +1192,56 @@ async function main() {
     process.exit(1);
   }
 
-  const cursor = loadCursor();
-  console.log(`Backend: ${BACKEND}`);
-  console.log(`DB:      ${DB.user}@${DB.host}:${DB.port}/${DB.database}`);
-  console.log(`Cursor:  lastClaimNumber=${cursor.lastClaimNumber}`);
-
   const client = new pg.Client(DB);
   await client.connect();
 
   try {
+    if (args.planWorkers) {
+      await planWorkers(client, args.planWorkers, args.after);
+      return;
+    }
+
+    const range = { from: args.from, to: args.to };
+    const cursor = loadCursor(range);
+    console.log(`Backend: ${BACKEND}`);
+    console.log(`DB:      ${DB.user}@${DB.host}:${DB.port}/${DB.database}`);
+    if (WORKER_ID) console.log(`Worker:  ${WORKER_ID}`);
+    if (args.from != null || args.to != null) {
+      console.log(`Range:   ${args.from ?? '…'} → ${args.to ?? '…'}`);
+    }
+    console.log(`Cursor:  lastClaimNumber=${cursor.lastClaimNumber}`);
+    console.log(`Files:   ${PROGRESS_FILE}`);
+
+    if (args.to != null && cursor.lastClaimNumber >= args.to) {
+      console.log(`Already past --to (${args.to}). Nothing to do.`);
+      await printStatus(client, cursor, args);
+      return;
+    }
+
     if (args.status) {
-      await printStatus(client, cursor);
+      await printStatus(client, cursor, args);
       return;
     }
     if (args.registerOnly) {
       await registerOnly(client, cursor);
       saveCursor(cursor, { registriesOnly: true });
-      await printStatus(client, loadCursor());
+      await printStatus(client, loadCursor(range), args);
       return;
     }
     await importBatch(client, cursor, args);
     saveCursor(cursor);
-    await printStatus(client, cursor);
+    await printStatus(client, cursor, args);
   } finally {
     await client.end();
   }
 }
 
 main().catch((e) => {
-  appendLines(RUN_LOG, [`RUN FATAL  ${new Date().toISOString()}  ${e.message}`]);
+  try {
+    appendLines(RUN_LOG, [`RUN FATAL  ${new Date().toISOString()}  ${e.message}`]);
+  } catch {
+    /* paths may not be configured yet */
+  }
   console.error(e);
   process.exit(1);
 });

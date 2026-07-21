@@ -20,9 +20,12 @@ yarn-error.log*
 lerna-debug.log*
 # DB seed resume state (share across machines)
 !logs/db-seed-progress.json
+!logs/db-seed-progress-*.json
 !logs/db-seed-registries.json
 !logs/db-seed-cursor.json
+!logs/db-seed-cursor-*.json
 !logs/db-seed-records.log
+!logs/db-seed-records-*.log
 
 # OS
 .DS_Store
