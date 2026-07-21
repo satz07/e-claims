@@ -7,6 +7,7 @@ import {
   formatKes,
   formatPeriod,
   formatRecordUse,
+  shortHash,
   type ClaimRow,
 } from "@/lib/claim-display"
 import { Input } from "./ui/input"
@@ -22,6 +23,64 @@ interface ResultsTableProps {
   onPageChange?: (page: number) => void
   onPageSizeChange?: (size: number) => void
   detailMode?: boolean
+}
+
+function CopyableClaimId({
+  claimId,
+  claimIdHash,
+}: {
+  claimId?: string
+  claimIdHash?: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  // Prefer plaintext UUID when meta has it; otherwise full on-chain hash (never the truncated "0xabc…def")
+  const full = (() => {
+    const id = (claimId || "").trim()
+    const hash = (claimIdHash || "").trim()
+    if (id && !id.includes("…") && !id.includes("...")) return id
+    if (hash) return hash
+    if (id) return id.replace(/…/g, "").replace(/\.\.\./g, "")
+    return ""
+  })()
+
+  if (!full || full === "—") {
+    return <span className="text-muted-foreground">—</span>
+  }
+
+  const display = shortHash(full, 10, 8)
+
+  const copy = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(full)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`${full}\n\nClick to copy full ID`}
+      className="group relative max-w-[220px] text-left font-mono text-xs md:text-sm text-foreground hover:text-primary underline-offset-2 hover:underline"
+    >
+      <span className="block truncate">{copied ? "Copied!" : display}</span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 bottom-full z-30 mb-1 hidden w-max max-w-[min(90vw,420px)] break-all rounded-md border border-border bg-popover px-2 py-1.5 text-[11px] font-mono text-popover-foreground shadow-md group-hover:block"
+      >
+        {full}
+        <span className="mt-1 block text-[10px] text-muted-foreground normal-case">
+          Click to copy full ID
+        </span>
+      </span>
+    </button>
+  )
 }
 
 function PaginationControls({
@@ -155,11 +214,13 @@ export function ResultsTable({
         />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto overflow-y-visible rounded-lg border border-border">
         <table className="min-w-full border-collapse">
           <thead>
             <tr className="bg-muted/80">
-              <th className="px-3 py-3 text-left text-xs font-semibold text-foreground whitespace-nowrap">Claim ID</th>
+              <th className="px-3 py-3 text-left text-xs font-semibold text-foreground whitespace-nowrap">
+                Claim ID <span className="font-normal text-muted-foreground">(hover / click to copy)</span>
+              </th>
               <th className="px-3 py-3 text-left text-xs font-semibold text-foreground whitespace-nowrap">Use</th>
               <th className="px-3 py-3 text-left text-xs font-semibold text-foreground whitespace-nowrap">Facility</th>
               <th className="px-3 py-3 text-left text-xs font-semibold text-foreground whitespace-nowrap">Patient (CR)</th>
@@ -173,10 +234,8 @@ export function ResultsTable({
           <tbody>
             {results.map((claim) => (
               <tr key={claim.claimNumber ?? claim.claimId} className="border-t border-border hover:bg-muted/30">
-                <td className="px-3 py-3 text-xs md:text-sm text-foreground font-mono">
-                  <div className="max-w-[200px] truncate" title={claim.claimId}>
-                    {claim.claimId}
-                  </div>
+                <td className="px-3 py-3 text-xs md:text-sm text-foreground font-mono relative overflow-visible">
+                  <CopyableClaimId claimId={claim.claimId} claimIdHash={claim.claimIdHash} />
                 </td>
                 <td className="px-3 py-3 text-xs md:text-sm text-foreground whitespace-nowrap">
                   {formatRecordUse(claim.recordUse)}

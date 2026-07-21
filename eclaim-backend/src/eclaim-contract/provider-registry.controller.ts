@@ -17,9 +17,14 @@ export class ProviderRegistryController {
   @Get()
   async listProviders(
     @Query('page') page = '0',
-    @Query('size') size = '20',
+    @Query('size') size = '50',
   ) {
     return this.service.getAllProviders(Number(page), Number(size));
+  }
+
+  @Post('remember')
+  async rememberProvider(@Body() body: { providerId: string }) {
+    return this.service.rememberPlainId(body.providerId);
   }
 
   @Post('search')

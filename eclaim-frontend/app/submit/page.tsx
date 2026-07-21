@@ -121,10 +121,17 @@ export default function SubmitFhirPage() {
       })
       const prepared = await prepRes.json()
       if (!prepRes.ok) {
-        throw new Error(prepared?.message || prepared?.error || "Validation failed")
+        const msg = prepared?.message
+        throw new Error(
+          Array.isArray(msg) ? msg.join("; ") : msg || prepared?.error || "Validation failed",
+        )
       }
 
       const claimStruct = prepared.claimStruct as PreparedClaimStruct
+      if (!claimStruct?.claimIdHash) {
+        throw new Error("Backend prepare-submit returned no claimStruct — restart backend and retry")
+      }
+
       const txHash = await writeContractAndWait(writeContractAsync, {
         address: CONTRACT_ADDRESS,
         abi: UPSERT_CLAIM_ABI,
@@ -159,6 +166,42 @@ export default function SubmitFhirPage() {
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; message?: string }
       setError(err?.shortMessage || err?.message || "Submit failed — confirm in MetaMask")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /** Backend wallet signs (same path as generate-claims.mjs) — no MetaMask ABI needed */
+  const handleServerSubmit = async () => {
+    setError(null)
+    setResult(null)
+    setLoading(true)
+    try {
+      const body = JSON.parse(jsonText)
+      const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"
+      const res = await fetch(`${base}/api/public/eclaim-contract/submit?wait=false`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        const msg = data?.message
+        throw new Error(Array.isArray(msg) ? msg.join("; ") : msg || data?.error || "Submit failed")
+      }
+      setResult({
+        recordUse: data.recordUse,
+        claimId: data.claimId,
+        claimNumber: data.claimNumber,
+        fid: data.fid,
+        claimedTotal: data.claimedTotal,
+        txHash: data.txHash,
+        bundleHash: data.bundleHash,
+        mode: data.pending ? "server (pending confirm)" : "server",
+      })
+    } catch (e: unknown) {
+      const err = e as { message?: string }
+      setError(err?.message || "Server submit failed")
     } finally {
       setLoading(false)
     }
@@ -211,18 +254,24 @@ export default function SubmitFhirPage() {
         onChange={(e) => setJsonText(e.target.value)}
       />
 
-      <Button onClick={handleSubmit} disabled={loading || isTxPending}>
-        {loading
-          ? isTxPending
-            ? "Confirm in MetaMask…"
-            : "Waiting for confirmation…"
-          : "Anchor on Chain"}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={handleSubmit} disabled={loading || isTxPending}>
+          {loading
+            ? isTxPending
+              ? "Confirm in MetaMask…"
+              : "Waiting for confirmation…"
+            : "Anchor on Chain"}
+        </Button>
+        <Button variant="outline" onClick={handleServerSubmit} disabled={loading}>
+          Anchor via backend
+        </Button>
+      </div>
 
-      {error && <p className="text-red-400 text-sm">{error}</p>}
+      {error && <p className="text-red-400 text-sm whitespace-pre-wrap">{error}</p>}
 
       {result && (
         <div className="rounded-md border border-green-800 bg-green-950/40 p-4 text-sm space-y-2">
+          {result.mode && <p><strong>mode:</strong> {result.mode}</p>}
           <p><strong>recordUse:</strong> {result.recordUse}</p>
           <p><strong>claimId:</strong> {result.claimId}</p>
           <p><strong>claimNumber:</strong> {result.claimNumber}</p>

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -8,6 +9,7 @@ import * as ABI from './VERIFIABLE_REGISTRY.json';
 import { txHashFromReceipt } from './tx-receipt.util';
 import { getActiveChain } from './chain-config';
 import { waitAndAudit } from './tx-audit-log';
+import { rememberId, resolveIdLabel } from './registry-id-labels';
 
 const RPC_URL = getActiveChain().rpcUrl;
 
@@ -178,6 +180,9 @@ export class VerifiableRegistryService {
         }
       }
 
+      // Newest registrations first
+      orderedHashes.reverse();
+
       const total = orderedHashes.length;
       const totalPages = Math.ceil(total / size) || 1;
       const pageHashes = orderedHashes.slice(page * size, page * size + size);
@@ -192,7 +197,11 @@ export class VerifiableRegistryService {
                 Math.floor(Date.now() / 1000),
               ),
             ]);
-            return this.mapEntry(entry, this.shortHash(idHash), authorized);
+            return this.mapEntry(
+              entry,
+              resolveIdLabel(kind, idHash) || this.shortHash(idHash),
+              authorized,
+            );
           } catch {
             return {
               id: this.shortHash(idHash),
@@ -221,6 +230,14 @@ export class VerifiableRegistryService {
     }
   }
 
+  async rememberPlainId(kind: RegistryKind, id: string) {
+    if (!id?.trim()) {
+      throw new BadRequestException('id is required');
+    }
+    rememberId(kind, id.trim());
+    return { ok: true, kind, id: id.trim(), idHash: h(id.trim()) };
+  }
+
   async register(
     kind: RegistryKind,
     body: {
@@ -239,6 +256,7 @@ export class VerifiableRegistryService {
       contractAddress: this.addressFor(kind),
       extra: { kind, id: body.id },
     });
+    rememberId(kind, body.id);
     return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
   }
 

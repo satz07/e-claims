@@ -18,8 +18,13 @@ function registryController(kind: 'citizen' | 'clinician' | 'insurer', tag: stri
     constructor(public readonly service: VerifiableRegistryService) {}
 
     @Get()
-    list(@Query('page') page = '0', @Query('size') size = '20') {
+    list(@Query('page') page = '0', @Query('size') size = '50') {
       return this.service.list(kind, Number(page), Number(size));
+    }
+
+    @Post('remember')
+    remember(@Body() body: { id: string }) {
+      return this.service.rememberPlainId(kind, body.id);
     }
 
     @Post('search')

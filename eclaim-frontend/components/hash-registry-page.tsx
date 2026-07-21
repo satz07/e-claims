@@ -117,12 +117,21 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
   const [lookupResult, setLookupResult] = useState<Record<string, unknown> | null>(null)
   const [listRows, setListRows] = useState<Record<string, unknown>[]>([])
   const [listConfigured, setListConfigured] = useState(true)
+  const [listPage, setListPage] = useState(0)
+  const [listPageMeta, setListPageMeta] = useState({
+    number: 0,
+    size: 50,
+    totalPages: 1,
+    totalElements: 0,
+  })
+  const [showIds, setShowIds] = useState(true)
+  const LIST_SIZE = 50
 
-  const fetchList = useCallback(async () => {
+  const fetchList = useCallback(async (page = 0) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(api)
+      const res = await fetch(`${api}?page=${page}&size=${LIST_SIZE}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data?.message || "List failed")
       if (config.kind === "provider") {
@@ -132,6 +141,14 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
         setListRows((data.entries as Record<string, unknown>[]) || [])
         setListConfigured(data.configured !== false)
       }
+      const p = data.page || {}
+      setListPage(Number(p.number ?? page))
+      setListPageMeta({
+        number: Number(p.number ?? page),
+        size: Number(p.size ?? LIST_SIZE),
+        totalPages: Math.max(1, Number(p.totalPages ?? 1)),
+        totalElements: Number(p.totalElements ?? 0),
+      })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "List failed")
     } finally {
@@ -140,7 +157,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
   }, [api, config.kind])
 
   useEffect(() => {
-    if (tab === "list") fetchList()
+    if (tab === "list") fetchList(0)
   }, [tab, fetchList])
 
   const register = async () => {
@@ -186,10 +203,25 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
 
       const id =
         config.kind === "provider" ? providerForm.providerId : simpleForm.id
+
+      // Remember plaintext so List can show original ID (hash alone is not reversible)
+      try {
+        await fetch(`${api}/remember`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            config.kind === "provider" ? { providerId: id } : { id },
+          ),
+        })
+      } catch {
+        /* non-fatal */
+      }
+
       setSuccess({
         message: `Registered ${id} (signed with your wallet).`,
         txHash,
       })
+      if (tab === "list") fetchList(listPage)
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; message?: string }
       setError(err?.shortMessage || err?.message || "Register failed — confirm in MetaMask")
@@ -230,6 +262,17 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
   )
 
   const listIdKey = config.kind === "provider" ? "providerId" : "id"
+
+  const rowIdDisplay = (row: Record<string, unknown>) => {
+    const fullHash = String(row.providerIdHash ?? row.idHash ?? "")
+    const label = String(row[listIdKey] ?? row.id ?? "—")
+    if (fullHash && fullHash !== label) {
+      return { label, hash: fullHash }
+    }
+    return { label, hash: fullHash || label }
+  }
+
+  const colCount = showIds ? 5 : 3
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -382,8 +425,19 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
 
       {tab === "lookup" && (
         <div className="space-y-4 border rounded-lg p-4 bg-card">
+          <p className="text-sm text-muted-foreground">
+            Enter the <strong>original plaintext ID</strong> (e.g.{" "}
+            <code className="text-xs">{config.idPlaceholder}</code>
+            {config.kind === "insurer" ? ", SHIF, TSC" : ""}
+            {config.kind === "provider" ? ", FID-42-102973-7" : ""}
+            ). Backend hashes it and checks the chain — you cannot look up by the 0x… hash alone.
+          </p>
           <FormField label={config.idLabel}>
-            <Input value={lookupId} onChange={(e) => setLookupId(e.target.value)} />
+            <Input
+              value={lookupId}
+              onChange={(e) => setLookupId(e.target.value)}
+              placeholder={config.idPlaceholder}
+            />
           </FormField>
           <Button onClick={lookup} disabled={loading || !lookupId}>
             Lookup
@@ -415,11 +469,44 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
       )}
 
       {tab === "list" && (
-        <div className="overflow-x-auto border rounded-lg">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <span>
+              Showing {listRows.length} of {listPageMeta.totalElements} (newest first) · page{" "}
+              {listPageMeta.number + 1}/{listPageMeta.totalPages}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowIds((v) => !v)}
+              >
+                {showIds ? "Hide IDs" : "Show IDs"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || listPage <= 0}
+                onClick={() => fetchList(listPage - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || listPage + 1 >= listPageMeta.totalPages}
+                onClick={() => fetchList(listPage + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+          <div className="overflow-x-auto border rounded-lg">
           <table className="min-w-full text-sm">
             <thead className="bg-muted">
               <tr>
-                <th className="px-3 py-2 text-left">ID</th>
+                {showIds && <th className="px-3 py-2 text-left">Original ID</th>}
+                {showIds && <th className="px-3 py-2 text-left">On-chain hash</th>}
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Authorized</th>
                 <th className="px-3 py-2 text-left">
@@ -430,30 +517,47 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="p-6 text-center text-muted-foreground">
+                  <td colSpan={colCount} className="p-6 text-center text-muted-foreground">
                     Loading…
                   </td>
                 </tr>
               ) : listRows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-6 text-center text-muted-foreground">
+                  <td colSpan={colCount} className="p-6 text-center text-muted-foreground">
                     {!listConfigured ? "Registry not configured on backend" : "No entries yet"}
                   </td>
                 </tr>
               ) : (
-                listRows.map((row) => (
-                  <tr key={String(row.idHash ?? row.providerIdHash)} className="border-t">
-                    <td className="px-3 py-2">{String(row[listIdKey] ?? row.id)}</td>
-                    <td className="px-3 py-2">{String(row.status)}</td>
-                    <td className="px-3 py-2">{row.authorized ? "Yes" : "No"}</td>
-                    <td className="px-3 py-2">
-                      {String(row.validTo ?? row.licenseValidTo ?? "—")}
-                    </td>
-                  </tr>
-                ))
+                listRows.map((row) => {
+                  const id = rowIdDisplay(row)
+                  return (
+                    <tr key={String(row.idHash ?? row.providerIdHash)} className="border-t">
+                      {showIds && (
+                        <td className="px-3 py-2 font-medium">
+                          {id.label.startsWith("0x") ? (
+                            <span className="text-muted-foreground text-xs">unknown (hash only)</span>
+                          ) : (
+                            id.label
+                          )}
+                        </td>
+                      )}
+                      {showIds && (
+                        <td className="px-3 py-2 font-mono text-xs break-all max-w-xs text-muted-foreground">
+                          {id.hash || "—"}
+                        </td>
+                      )}
+                      <td className="px-3 py-2">{String(row.status)}</td>
+                      <td className="px-3 py-2">{row.authorized ? "Yes" : "No"}</td>
+                      <td className="px-3 py-2">
+                        {String(row.validTo ?? row.licenseValidTo ?? "—")}
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

@@ -17,6 +17,13 @@ const OWNER_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ internalType: 'address', name: '', type: 'address' }],
+    name: 'authorizedSubmitters',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const
 
 const METAMASK_TIMEOUT_MS = 180_000
@@ -36,17 +43,31 @@ function parseRevertReason(err: unknown): string | null {
   return raw ? raw.slice(0, 200) : null
 }
 
-async function assertOwnerWallet(account: `0x${string}`, contract: `0x${string}`) {
-  const onChainOwner = await publicClient.readContract({
+async function assertAuthorizedWallet(account: `0x${string}`, contract: `0x${string}`) {
+  const onChainOwner = (await publicClient.readContract({
     address: contract,
     abi: OWNER_ABI,
     functionName: 'owner',
-  })
-  if (onChainOwner.toLowerCase() !== account.toLowerCase()) {
+  })) as string
+
+  if (onChainOwner.toLowerCase() === account.toLowerCase()) return
+
+  let isSubmitter = false
+  try {
+    isSubmitter = (await publicClient.readContract({
+      address: contract,
+      abi: OWNER_ABI,
+      functionName: 'authorizedSubmitters',
+      args: [account],
+    })) as boolean
+  } catch {
+    // V1 / older ABI without authorizedSubmitters
+  }
+
+  if (!isSubmitter) {
     throw new Error(
-      `Connected wallet ${shorten(account)} is not the contract owner. ` +
-        `Switch MetaMask to Operator/Admin ${shorten(CONTRACT_OWNER_ADDRESS)} — ` +
-        `only that account can write (others revert with "Not owner").`,
+      `Connected wallet ${shorten(account)} is not the contract owner or an authorized submitter. ` +
+        `Switch MetaMask to ${shorten(CONTRACT_OWNER_ADDRESS)} (or an authorized submitter).`,
     )
   }
 }
@@ -68,7 +89,7 @@ export async function writeContractAndWait(
   const functionName = params.functionName as ContractFunctionName
   const args = params.args as readonly unknown[]
 
-  await assertOwnerWallet(account, contractAddress)
+  await assertAuthorizedWallet(account, contractAddress)
 
   try {
     await publicClient.simulateContract({

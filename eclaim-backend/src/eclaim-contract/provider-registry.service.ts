@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,7 @@ import * as ABI from './PROVIDER_REGISTRY.json';
 import { txHashFromReceipt } from './tx-receipt.util';
 import { getActiveChain } from './chain-config';
 import { waitAndAudit } from './tx-audit-log';
+import { rememberId, resolveIdLabel } from './registry-id-labels';
 
 const PROVIDER_REGISTRY_ADDRESS =
   process.env.PROVIDER_REGISTRY_ADDRESS ||
@@ -180,6 +182,9 @@ export class ProviderRegistryService {
         }
       }
 
+      // Newest registrations first (events are chronological)
+      orderedHashes.reverse();
+
       const total = orderedHashes.length;
       const totalPages = Math.ceil(total / size) || 1;
       const pageHashes = orderedHashes.slice(page * size, page * size + size);
@@ -187,10 +192,13 @@ export class ProviderRegistryService {
       const providers = await Promise.all(
         pageHashes.map(async (idHash) => {
           try {
-            return await this.fetchProviderByHash(idHash);
+            return await this.fetchProviderByHash(
+              idHash,
+              resolveIdLabel('provider', idHash) || undefined,
+            );
           } catch {
             return {
-              providerId: this.shortHash(idHash),
+              providerId: resolveIdLabel('provider', idHash) || this.shortHash(idHash),
               providerIdHash: idHash,
               nameHash: '—',
               level: '—',
@@ -218,6 +226,18 @@ export class ProviderRegistryService {
         error?.message || 'Failed to fetch providers',
       );
     }
+  }
+
+  async rememberPlainId(providerId: string) {
+    if (!providerId?.trim()) {
+      throw new BadRequestException('providerId is required');
+    }
+    rememberId('provider', providerId.trim());
+    return {
+      ok: true,
+      providerId: providerId.trim(),
+      providerIdHash: h(providerId.trim()),
+    };
   }
 
   async registerProvider(body: {
@@ -252,6 +272,7 @@ export class ProviderRegistryService {
       extra: { providerId: body.providerId },
     });
 
+    rememberId('provider', body.providerId);
     return { txHash: txHashFromReceipt(receipt), providerId: body.providerId };
   }
 

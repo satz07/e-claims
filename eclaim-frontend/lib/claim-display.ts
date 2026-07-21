@@ -1,6 +1,8 @@
 export type ClaimRow = {
   claimNumber?: string
   claimId?: string
+  /** Full on-chain claimIdHash (0x…64); use for copy when claimId is truncated */
+  claimIdHash?: string
   recordUse?: string
   claimType?: string
   fid?: string
