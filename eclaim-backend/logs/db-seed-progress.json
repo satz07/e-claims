@@ -1,0 +1,12 @@
+{
+  "lastClaimNumber": 322672,
+  "lastClaimId": "50c4fd40-971a-449f-ac93-27433927aafe",
+  "lastBundleId": "83442d7b-c443-4a2e-9331-5e586d6d9c57",
+  "lastImportedAt": "2026-07-21T21:00:59.401Z",
+  "totals": {
+    "claimsOk": 91,
+    "preauthsOk": 36,
+    "errors": 2,
+    "skipped": 0
+  }
+}

@@ -132,6 +132,10 @@ export class EclaimContractService {
   private submitChainLock: Promise<void> = Promise.resolve();
   /** Avoid re-scanning ClaimUpserted history on every submit; refreshed once then incremented. */
   private lastClaimNumberCache: bigint | null = null;
+  /** Newest-first unique claim numbers from ClaimUpserted; avoids re-scan on every list page. */
+  private claimNumbersCache: number[] | null = null;
+  private claimNumbersCacheAtMs = 0;
+  private static readonly CLAIM_NUMBERS_TTL_MS = 60_000;
 
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
@@ -414,16 +418,74 @@ export class EclaimContractService {
   private async nextClaimNumber(): Promise<bigint> {
     let max = this.lastClaimNumberCache ?? 0n;
     if (this.lastClaimNumberCache == null) {
-      const events = await this.queryClaimUpsertedEvents();
-      for (const e of events) {
-        const n = BigInt(e.args.claimNumber);
-        if (n > max) max = n;
+      const ordered = await this.getOrderedClaimNumbers(true);
+      for (const n of ordered) {
+        const bn = BigInt(n);
+        if (bn > max) max = bn;
       }
     }
     const candidate = BigInt(Date.now());
     const next = candidate > max ? candidate : max + 1n;
     this.lastClaimNumberCache = next;
     return next;
+  }
+
+  /** Newest-first unique claim numbers; cached with short TTL, updated on submit. */
+  private async getOrderedClaimNumbers(force = false): Promise<number[]> {
+    const fresh =
+      this.claimNumbersCache &&
+      !force &&
+      Date.now() - this.claimNumbersCacheAtMs < EclaimContractService.CLAIM_NUMBERS_TTL_MS;
+    if (fresh) return this.claimNumbersCache!;
+
+    const events = await this.queryClaimUpsertedEvents();
+    const seen = new Set<number>();
+    const ordered: number[] = [];
+    for (const e of events) {
+      const n = Number(e.args.claimNumber);
+      if (!seen.has(n)) {
+        seen.add(n);
+        ordered.push(n);
+      }
+    }
+    ordered.reverse();
+    this.claimNumbersCache = ordered;
+    this.claimNumbersCacheAtMs = Date.now();
+
+    let max = this.lastClaimNumberCache ?? 0n;
+    for (const n of ordered) {
+      const bn = BigInt(n);
+      if (bn > max) max = bn;
+    }
+    if (ordered.length) this.lastClaimNumberCache = max;
+
+    return ordered;
+  }
+
+  /** Keep list cache in sync when this process anchors a new claim. */
+  private rememberClaimNumber(claimNumber: number) {
+    const n = Number(claimNumber);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const bn = BigInt(n);
+    if (this.lastClaimNumberCache == null || bn > this.lastClaimNumberCache) {
+      this.lastClaimNumberCache = bn;
+    }
+    if (!this.claimNumbersCache) return;
+    if (this.claimNumbersCache[0] === n) return;
+    this.claimNumbersCache = this.claimNumbersCache.filter((x) => x !== n);
+    this.claimNumbersCache.unshift(n);
+    this.claimNumbersCacheAtMs = Date.now();
+  }
+
+  /** List candidates using local meta only (no RPC). Unknown / fhir-looking kept for page fetch. */
+  private isListCandidate(n: number, recordUse?: RecordUse): boolean {
+    const meta = this.metaCache.get(n);
+    if (this.isDemoMeta(meta)) return false;
+    if (recordUse && (meta?.recordUse || '—') !== recordUse) return false;
+    if (!meta) return true;
+    if (meta.source === 'fhir') return true;
+    if (meta.claimType === 'institutional' && !meta.patientName && !meta.shaCode) return true;
+    return false;
   }
 
   /** Validate facility + citizen + scheme against hash registries before gas spend. */
@@ -560,6 +622,7 @@ export class EclaimContractService {
 
       const meta = this.fhirMetaFromParsed(parsed);
       this.cacheClaimMeta(Number(claimNumber), meta);
+      this.rememberClaimNumber(Number(claimNumber));
 
       const base = {
         txHash: tx.hash,
@@ -725,22 +788,14 @@ export class EclaimContractService {
 
   async getAllClaims(page = 0, size = 20, recordUse?: RecordUse) {
     try {
-      const events = await this.queryClaimUpsertedEvents();
+      const pageNo = Math.max(0, Number(page) || 0);
+      const pageSize = Math.min(100, Math.max(1, Number(size) || 20));
 
-      const seenNumbers = new Set<number>();
-      const ordered: number[] = [];
-      for (const e of events) {
-        const n = Number(e.args.claimNumber);
-        if (!seenNumbers.has(n)) {
-          seenNumbers.add(n);
-          ordered.push(n);
-        }
-      }
+      const ordered = await this.getOrderedClaimNumbers();
+      const candidates = ordered.filter((n) => this.isListCandidate(n, recordUse));
+      const totalElements = candidates.length;
+      const totalPages = Math.ceil(totalElements / pageSize) || 1;
 
-      // Newest first
-      ordered.reverse();
-
-      // On-chain first — does not require local claim-meta.json
       const from = await this.ownerAddressForReads();
       const tryGetClaim = async (n: number) => {
         try {
@@ -749,52 +804,52 @@ export class EclaimContractService {
           if (this.legacyContract) {
             try {
               const legacyFrom = await this.legacyOwnerAddressForReads();
-              const raw = await this.legacyContract['getClaim'].staticCall(n, { from: legacyFrom });
+              const raw = await this.legacyContract['getClaim'].staticCall(n, {
+                from: legacyFrom,
+              });
               return this.normalizeV1Claim(raw);
-            } catch { /* not found */ }
+            } catch {
+              /* not found */
+            }
           }
           return null;
         }
       };
 
-      const loaded = await Promise.all(
-        ordered.map(async (n) => {
-          const meta = this.metaCache.get(n);
-          if (this.isDemoMeta(meta)) return null;
-          try {
-            const claim = await tryGetClaim(n);
-            if (!claim) return null;
-            if (!this.isFhirClaim(n, meta, claim)) return null;
-            const use = meta?.recordUse || '—';
-            if (recordUse && use !== recordUse) return null;
-            return { n, claim, meta };
-          } catch {
-            return null;
-          }
-        }),
-      );
+      // Only RPC getClaim for this page; walk forward if some rows filter out.
+      const claims: ReturnType<EclaimContractService['mapClaimStruct']>[] = [];
+      let i = pageNo * pageSize;
+      while (claims.length < pageSize && i < candidates.length) {
+        const need = pageSize - claims.length;
+        const batch = candidates.slice(i, i + need);
+        i += batch.length;
 
-      const fhirRows = loaded.filter(Boolean) as {
-        n: number;
-        claim: any;
-        meta?: ClaimMeta;
-      }[];
-
-      const filteredTotal = fhirRows.length;
-      const filteredPages = Math.ceil(filteredTotal / size) || 1;
-      const slice = fhirRows.slice(page * size, page * size + size);
-
-      const claims = slice.map(({ claim, meta }) =>
-        this.mapClaimStruct(claim, meta),
-      );
+        const loaded = await Promise.all(
+          batch.map(async (n) => {
+            const meta = this.metaCache.get(n);
+            try {
+              const claim = await tryGetClaim(n);
+              if (!claim) return null;
+              if (!this.isFhirClaim(n, meta, claim)) return null;
+              if (recordUse && (meta?.recordUse || '—') !== recordUse) return null;
+              return this.mapClaimStruct(claim, meta);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        for (const row of loaded) {
+          if (row) claims.push(row);
+        }
+      }
 
       return {
         claims,
         page: {
-          totalPages: filteredPages,
-          totalElements: filteredTotal,
-          size,
-          number: page,
+          totalPages,
+          totalElements,
+          size: pageSize,
+          number: pageNo,
         },
       };
     } catch (error: any) {

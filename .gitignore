@@ -25,7 +25,12 @@ deploy-contracts/logs/
 # Backend runtime / local state
 eclaim-backend/claim-meta.json
 eclaim-backend/.env
-eclaim-backend/logs/
+eclaim-backend/logs/*
+# DB seed resume state (share across machines)
+!eclaim-backend/logs/db-seed-progress.json
+!eclaim-backend/logs/db-seed-registries.json
+!eclaim-backend/logs/db-seed-cursor.json
+!eclaim-backend/logs/db-seed-records.log
 
 # Frontend local env
 eclaim-frontend/.env.local
