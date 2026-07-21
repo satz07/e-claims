@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ethers } from 'ethers';
 import * as ABI from './CLAIM_REGISTRY.json';
+import * as ABI_V1 from './CLAIM_REGISTRY_V1.json';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -25,6 +26,7 @@ const ACTIVE_CHAIN = getActiveChain();
 const CONTRACT_ADDRESS =
   process.env.CLAIM_REGISTRY_ADDRESS ||
   '0x9a6b73f558Bad360a3251C220D383A0f641a58Bc';
+const LEGACY_CONTRACT_ADDRESS = process.env.CLAIM_REGISTRY_V1_ADDRESS || '';
 const RPC_URL = ACTIVE_CHAIN.rpcUrl;
 
 const STATUS_MAP: Record<number, string> = {
@@ -123,6 +125,8 @@ export interface ClaimMeta {
 export class EclaimContractService {
   private provider: ethers.JsonRpcProvider;
   private contract: ethers.Contract;
+  /** Legacy (V1) contract — read-only for old data. Null when not configured. */
+  private legacyContract: ethers.Contract | null;
   private metaCache = new Map<number, ClaimMeta>();
 
   constructor(
@@ -131,6 +135,9 @@ export class EclaimContractService {
   ) {
     this.provider = new ethers.JsonRpcProvider(RPC_URL);
     this.contract = new ethers.Contract(CONTRACT_ADDRESS, ABI.abi, this.provider);
+    this.legacyContract = LEGACY_CONTRACT_ADDRESS
+      ? new ethers.Contract(LEGACY_CONTRACT_ADDRESS, ABI_V1.abi, this.provider)
+      : null;
     this.loadMetaFromDisk();
   }
 
@@ -189,7 +196,7 @@ export class EclaimContractService {
   }
 
   private isFhirOnChain(claim: any): boolean {
-    const flh = claim?.facilityLevelHash;
+    const flh = claim?.providerLevelHash;
     return !!flh && flh !== ZERO_HASH;
   }
 
@@ -242,35 +249,58 @@ export class EclaimContractService {
     return this.contract[fn].staticCall(...args, { from });
   }
 
+  /** Normalize V1 struct field names to match the V3 names used by mapClaimStruct. */
+  private normalizeV1Claim(claim: any): any {
+    if (claim.providerNameHash !== undefined) return claim; // already V3
+    return {
+      ...claim,
+      claimNumber: claim.claimNumber,
+      claimIdHash: claim.claimIdHash,
+      claimTypeHash: claim.claimTypeHash,
+      providerNameHash: claim.fidHash,
+      providerLevelHash: claim.facilityLevelHash,
+      bundleIdHash: claim.bundleIdHash,
+      shaCodeHash: claim.schemeCodeHash,
+      shaPackageCodeHash: claim.bundleContentHash,
+      crIdHash: claim.crIdHash,
+      claimCodeHash: claim.interventionCodeHash,
+      nationalIdHash: claim.nationalIdHash,
+      creationDate: claim.creationDate,
+      dateFrom: claim.dateFrom,
+      dateTo: claim.dateTo,
+      claimedTotal: claim.claimedTotal,
+      ipsClaim: claim.ipsClaim,
+      status: claim.status,
+    };
+  }
+
   private mapClaimStruct(claim: any, meta?: ClaimMeta) {
-    const recordUse =
-      meta?.recordUse ||
-      recordUseFromHash(claim?.recordUseHash) ||
-      '—';
     const claimType =
       meta?.claimType ||
       labelFromHash(claim?.claimTypeHash);
+    const recordUse =
+      meta?.recordUse || '—';
     return {
       claimNumber: claim.claimNumber.toString(),
       claimId: meta?.claimId?.trim() || shortHash(claim?.claimIdHash),
       claimIdHash: claim?.claimIdHash ? String(claim.claimIdHash) : undefined,
       recordUse,
       claimType: claimType === '—' ? '—' : claimType,
-      fid: meta?.fid?.trim() || labelFromHash(claim?.fidHash),
+      fid: meta?.fid?.trim() || labelFromHash(claim?.providerNameHash),
       crId: meta?.crId?.trim() || labelFromHash(claim?.crIdHash),
-      schemeCode: meta?.schemeCode?.trim() || labelFromHash(claim?.schemeCodeHash),
+      schemeCode: meta?.schemeCode?.trim() || labelFromHash(claim?.shaCodeHash),
       facilityLevel:
-        meta?.facilityLevel?.trim() || labelFromHash(claim?.facilityLevelHash),
+        meta?.facilityLevel?.trim() || labelFromHash(claim?.providerLevelHash),
       interventionCode:
         meta?.interventionCode?.trim() ||
-        labelFromHash(claim?.interventionCodeHash),
+        labelFromHash(claim?.claimCodeHash),
       bundleId: meta?.bundleId?.trim() || shortHash(claim?.bundleIdHash),
       ipsClaim: meta?.ipsClaim ?? claim.ipsClaim ?? false,
       claimedTotal: claim.claimedTotal.toString(),
       dateFrom: this.formatUnix(claim.dateFrom),
       dateTo: this.formatUnix(claim.dateTo),
       creationDate: meta?.creationDate || this.formatUnix(claim.creationDate),
-      bundleHash: claim.bundleContentHash ?? claim.shaPackageCodeHash,
+      bundleHash: claim.shaPackageCodeHash,
       status: STATUS_MAP[Number(claim.status)] || 'unknown',
     };
   }
@@ -318,6 +348,7 @@ export class EclaimContractService {
         explorerUrl: ACTIVE_CHAIN.explorerUrl,
         protocolVersion: ACTIVE_CHAIN.protocolVersion ?? null,
         claimRegistryAddress: CONTRACT_ADDRESS,
+        legacyClaimRegistryAddress: LEGACY_CONTRACT_ADDRESS || null,
         providerRegistryAddress:
           process.env.PROVIDER_REGISTRY_ADDRESS ||
           '0x03f6849d7c37aF5E8535FFE6E10d4B6e3F44e8E8',
@@ -345,17 +376,24 @@ export class EclaimContractService {
     });
   }
 
-  /** ClaimRegistry.upsertClaim requires msg.sender == owner(). */
-  private async assertSignerIsOwner(signer: ethers.Wallet) {
-    const onChainOwner: string = await this.contract.owner();
+  /** ClaimRegistry V3: owner OR authorizedSubmitters. V1 fallback: owner only. */
+  private async assertSignerIsAuthorized(signer: ethers.Wallet) {
     const signerAddress = await signer.getAddress();
-    if (onChainOwner.toLowerCase() !== signerAddress.toLowerCase()) {
-      throw new BadRequestException(
-        `OWNER_PRIVATE_KEY wallet (${signerAddress}) is not ClaimRegistry owner (${onChainOwner}). ` +
-          `Set OWNER_PRIVATE_KEY to the owner account, or transfer ownership to ${signerAddress} ` +
-          `(see deploy-contracts/scripts/transfer-claim-registry-ownership.js).`,
-      );
+    const onChainOwner: string = await this.contract.owner();
+    if (onChainOwner.toLowerCase() === signerAddress.toLowerCase()) return;
+
+    // V3 contract has authorizedSubmitters mapping
+    try {
+      const isSubmitter = await this.contract.authorizedSubmitters(signerAddress);
+      if (isSubmitter) return;
+    } catch {
+      // V1 contract doesn't have authorizedSubmitters — fall through
     }
+
+    throw new BadRequestException(
+      `Wallet (${signerAddress}) is not ClaimRegistry owner (${onChainOwner}) and not an authorized submitter. ` +
+        `Set OWNER_PRIVATE_KEY to the owner/submitter account, or call addSubmitter(${signerAddress}) on the contract.`,
+    );
   }
 
   private async nextClaimNumber(): Promise<bigint> {
@@ -430,16 +468,14 @@ export class EclaimContractService {
       claimStruct: {
         claimIdHash: claimStruct.claimIdHash,
         claimNumber: claimStruct.claimNumber.toString(),
+        claimTypeHash: claimStruct.claimTypeHash,
+        providerNameHash: claimStruct.providerNameHash,
+        providerLevelHash: claimStruct.providerLevelHash,
         bundleIdHash: claimStruct.bundleIdHash,
-        bundleContentHash: claimStruct.bundleContentHash,
-        recordUseHash: claimStruct.recordUseHash,
-        fidHash: claimStruct.fidHash,
-        facilityLevelHash: claimStruct.facilityLevelHash,
-        schemeCodeHash: claimStruct.schemeCodeHash,
+        shaCodeHash: claimStruct.shaCodeHash,
         crIdHash: claimStruct.crIdHash,
         nationalIdHash: claimStruct.nationalIdHash,
-        claimTypeHash: claimStruct.claimTypeHash,
-        interventionCodeHash: claimStruct.interventionCodeHash,
+        claimCodeHash: claimStruct.claimCodeHash,
         creationDate: claimStruct.creationDate.toString(),
         dateFrom: claimStruct.dateFrom.toString(),
         dateTo: claimStruct.dateTo.toString(),
@@ -470,7 +506,7 @@ export class EclaimContractService {
     const claimStruct = buildClaimStruct(parsed, claimNumber);
 
     const signer = this.getSigner();
-    await this.assertSignerIsOwner(signer);
+    await this.assertSignerIsAuthorized(signer);
     const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
     await this.assertSufficientGas(signer, contractWithSigner, claimStruct);
     const tx = await contractWithSigner.upsertClaim(claimStruct);
@@ -506,40 +542,56 @@ export class EclaimContractService {
   }
 
   async getClaim(claimNumber: number) {
+    const meta = this.metaCache.get(claimNumber);
+
+    // Try primary (new) contract first
     try {
       const claim = await this.ownerStaticCall('getClaim', claimNumber);
-      const meta = this.metaCache.get(claimNumber);
-      if (!this.isFhirClaim(claimNumber, meta, claim)) {
-        throw new NotFoundException(`Claim ${claimNumber} not found`);
+      if (this.isFhirClaim(claimNumber, meta, claim)) {
+        return this.mapClaimStruct(claim, meta);
       }
-      return this.mapClaimStruct(claim, meta);
-    } catch (error: any) {
-      if (error instanceof NotFoundException) throw error;
-      if (error?.code === 'CALL_EXCEPTION') {
-        throw new NotFoundException(`Claim ${claimNumber} not found`);
-      }
-      throw new InternalServerErrorException(error?.message || 'Failed to fetch claim');
+    } catch { /* not found in primary — try legacy */ }
+
+    // Try legacy contract
+    if (this.legacyContract) {
+      try {
+        const from = await this.ownerAddressForReads();
+        const raw = await this.legacyContract['getClaim'].staticCall(claimNumber, { from });
+        const claim = this.normalizeV1Claim(raw);
+        if (this.isFhirClaim(claimNumber, meta, claim)) {
+          return this.mapClaimStruct(claim, meta);
+        }
+      } catch { /* not found in legacy either */ }
     }
+
+    throw new NotFoundException(`Claim ${claimNumber} not found`);
   }
 
-  /** Find claimNumber by querying ClaimUpserted events filtered on claimIdHash (indexed) */
-  private async findClaimNumberByIdHash(claimIdHash: string): Promise<number | null> {
+  private async findIdHashInContract(contract: ethers.Contract, claimIdHash: string): Promise<number | null> {
     const CHUNK = 99_000;
     const latestBlock = await this.provider.getBlockNumber();
     const startBlock = Math.max(0, latestBlock - 500_000);
-
-    const filter = this.contract.filters.ClaimUpserted(null, claimIdHash);
-
+    const filter = contract.filters.ClaimUpserted(null, claimIdHash);
     for (let from = startBlock; from <= latestBlock; from += CHUNK) {
       const to = Math.min(from + CHUNK - 1, latestBlock);
       try {
-        const chunk = await this.contract.queryFilter(filter, from, to);
+        const chunk = await contract.queryFilter(filter, from, to);
         if (chunk.length > 0) {
           return Number((chunk[chunk.length - 1] as any).args.claimNumber);
         }
       } catch {
         // skip failed chunk
       }
+    }
+    return null;
+  }
+
+  /** Find claimNumber by querying ClaimUpserted events filtered on claimIdHash (both contracts) */
+  private async findClaimNumberByIdHash(claimIdHash: string): Promise<number | null> {
+    const result = await this.findIdHashInContract(this.contract, claimIdHash);
+    if (result !== null) return result;
+    if (this.legacyContract) {
+      return this.findIdHashInContract(this.legacyContract, claimIdHash);
     }
     return null;
   }
@@ -564,24 +616,31 @@ export class EclaimContractService {
     return claimNumber !== null;
   }
 
-  private async queryClaimUpsertedEvents() {
+  private async queryEventsFrom(contract: ethers.Contract) {
     const CHUNK = 99_000;
     const latestBlock = await this.provider.getBlockNumber();
     const startBlock = Math.max(0, latestBlock - 500_000);
-    const allEvents: any[] = [];
-
-    const filter = this.contract.filters.ClaimUpserted();
-
+    const events: any[] = [];
+    const filter = contract.filters.ClaimUpserted();
     for (let from = startBlock; from <= latestBlock; from += CHUNK) {
       const to = Math.min(from + CHUNK - 1, latestBlock);
       try {
-        const chunk = await this.contract.queryFilter(filter, from, to);
-        allEvents.push(...chunk);
+        const chunk = await contract.queryFilter(filter, from, to);
+        events.push(...chunk);
       } catch {
         // skip failed chunk
       }
     }
+    return events;
+  }
 
+  /** Query ClaimUpserted events from both the current and legacy contract. */
+  private async queryClaimUpsertedEvents() {
+    const allEvents = await this.queryEventsFrom(this.contract);
+    if (this.legacyContract) {
+      const legacyEvents = await this.queryEventsFrom(this.legacyContract);
+      allEvents.push(...legacyEvents);
+    }
     return allEvents;
   }
 
@@ -603,15 +662,30 @@ export class EclaimContractService {
       ordered.reverse();
 
       // On-chain first — does not require local claim-meta.json
+      const from = await this.ownerAddressForReads();
+      const tryGetClaim = async (n: number) => {
+        try {
+          return await this.contract['getClaim'].staticCall(n, { from });
+        } catch {
+          if (this.legacyContract) {
+            try {
+              const raw = await this.legacyContract['getClaim'].staticCall(n, { from });
+              return this.normalizeV1Claim(raw);
+            } catch { /* not found */ }
+          }
+          return null;
+        }
+      };
+
       const loaded = await Promise.all(
         ordered.map(async (n) => {
           const meta = this.metaCache.get(n);
           if (this.isDemoMeta(meta)) return null;
           try {
-            const claim = await this.ownerStaticCall('getClaim', n);
+            const claim = await tryGetClaim(n);
+            if (!claim) return null;
             if (!this.isFhirClaim(n, meta, claim)) return null;
-            const use =
-              meta?.recordUse || recordUseFromHash(claim.recordUseHash);
+            const use = meta?.recordUse || '—';
             if (recordUse && use !== recordUse) return null;
             return { n, claim, meta };
           } catch {
@@ -650,7 +724,7 @@ export class EclaimContractService {
 
   async setClaimStatus(claimNumber: number, status: number) {
     const signer = this.getSigner();
-    await this.assertSignerIsOwner(signer);
+    await this.assertSignerIsAuthorized(signer);
     const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
     const tx = await contractWithSigner.setClaimStatus(claimNumber, status);
     const receipt = await tx.wait();

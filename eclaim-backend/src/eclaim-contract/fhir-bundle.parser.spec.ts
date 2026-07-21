@@ -83,10 +83,10 @@ describe('parseFhirBundle (QA MIS profile)', () => {
   it('builds minimal Claim struct for contract', () => {
     const p = parseFhirBundle(sampleBundle);
     const struct = buildClaimStruct(p, 1n);
-    expect(struct.fidHash).toBe(hashUtf8('FID-35-108719-7'));
-    expect(struct.recordUseHash).toBe(hashUtf8('claim'));
-    expect(struct.bundleContentHash).toBe(p.bundleContentHash);
-    expect(struct.interventionCodeHash).toBe(hashUtf8('PMF-12-001'));
+    expect(struct.providerNameHash).toBe(hashUtf8('FID-35-108719-7'));
+    expect(struct.claimTypeHash).toBe(hashUtf8('institutional'));
+    expect(struct.shaPackageCodeHash).toBe(p.bundleContentHash);
+    expect(struct.claimCodeHash).toBe(hashUtf8('PMF-12-001'));
   });
 
   it('parses preauthorization via Claim.use only', () => {
@@ -95,6 +95,6 @@ describe('parseFhirBundle (QA MIS profile)', () => {
     preAuth.entry[3].resource.identifier[0].value = 'preauth-uuid-001';
     const p = parseFhirBundle(preAuth);
     expect(p.recordUse).toBe('preauthorization');
-    expect(buildClaimStruct(p, 2n).recordUseHash).toBe(hashUtf8('preauthorization'));
+    expect(buildClaimStruct(p, 2n).claimTypeHash).toBe(hashUtf8('institutional'));
   });
 });
