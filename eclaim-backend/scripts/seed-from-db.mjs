@@ -727,7 +727,21 @@ async function fetchBatch(client, afterClaimNumber, limit, use, to = null) {
       c.bundle_id,
       c.use,
       c.claim_type,
-      c.claimed_total,
+      c.claimed_total AS claimed_total_raw,
+      COALESCE(
+        NULLIF(c.claimed_total, 0),
+        (
+          SELECT SUM(
+            CASE
+              WHEN i.quantity * i.unit_price > 0 THEN i.quantity * i.unit_price
+              ELSE 0
+            END
+          )
+          FROM claim_items i
+          WHERE i.claim_id = c.claim_id
+        ),
+        0
+      ) AS claimed_total,
       c.date_from,
       c.date_to,
       c.created_date,
@@ -1036,6 +1050,21 @@ async function importBatch(client, cursor, args) {
       ]);
       console.error(`  ${label} SKIP missing fields`);
       // still advance cursor so we don't stall
+      cursor.lastClaimNumber = Number(row.claim_number);
+      cursor.lastClaimId = row.claim_id;
+      cursor.lastBundleId = row.bundle_id;
+      cursor.lastImportedAt = ts;
+      saveCursor(cursor);
+      continue;
+    }
+
+    const amount = Number(row.claimed_total) || 0;
+    if (amount <= 0) {
+      cursor.totals.skipped++;
+      appendLines(RECORD_LOG, [
+        `${ts} SKIP claim_number=${row.claim_number} claim_id=${row.claim_id} reason=zero_amount claimed_total_raw=${row.claimed_total_raw ?? row.claimed_total}`,
+      ]);
+      console.warn(`  ${label} SKIP zero amount (raw=${row.claimed_total_raw ?? 'n/a'})`);
       cursor.lastClaimNumber = Number(row.claim_number);
       cursor.lastClaimId = row.claim_id;
       cursor.lastBundleId = row.bundle_id;

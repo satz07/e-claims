@@ -1,12 +1,12 @@
 {
-  "lastClaimNumber": 322807,
-  "lastClaimId": "f8dc36c9-8641-4438-b498-f757a0fa1322",
-  "lastBundleId": "672a5e3e-b124-4bf6-b3ea-ab0e9e09f0db",
-  "lastImportedAt": "2026-07-21T21:28:09.819Z",
+  "lastClaimNumber": 322868,
+  "lastClaimId": "6b0d737c-66f7-41c3-922d-37641ad4eebd",
+  "lastBundleId": "8d048ae8-9fc5-4657-91a1-6776571b4853",
+  "lastImportedAt": "2026-07-21T21:38:57.964Z",
   "totals": {
-    "claimsOk": 39,
-    "preauthsOk": 18,
-    "errors": 29,
+    "claimsOk": 55,
+    "preauthsOk": 35,
+    "errors": 56,
     "skipped": 0
   },
   "range": {

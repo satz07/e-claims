@@ -1,8 +1,8 @@
 {
-  "lastClaimNumber": 322807,
-  "lastClaimId": "f8dc36c9-8641-4438-b498-f757a0fa1322",
-  "lastBundleId": "672a5e3e-b124-4bf6-b3ea-ab0e9e09f0db",
-  "lastImportedAt": "2026-07-21T21:28:09.819Z",
+  "lastClaimNumber": 322869,
+  "lastClaimId": "81705be0-0713-45ee-897c-a360dc5f158e",
+  "lastBundleId": "1ffe92ad-6c7f-4e2b-adfa-c3958c8fe1ef",
+  "lastImportedAt": "2026-07-21T21:39:05.700Z",
   "range": {
     "from": 322719,
     "to": 340777,
@@ -10,13 +10,13 @@
   },
   "worker": "A",
   "totals": {
-    "claimsOk": 39,
-    "preauthsOk": 18,
-    "errors": 29,
+    "claimsOk": 56,
+    "preauthsOk": 35,
+    "errors": 56,
     "skipped": 0,
-    "providersRegistered": 209,
+    "providersRegistered": 210,
     "schemesRegistered": 15,
-    "citizensRegistered": 15
+    "citizensRegistered": 22
   },
   "registered": {
     "providers": {
@@ -228,7 +228,8 @@
       "FID-43-106836-1": true,
       "FID-43-108565-4": true,
       "FID-43-112246-5": true,
-      "FID-43-112246-6": true
+      "FID-43-112246-6": true,
+      "FID-45-113693-5": true
     },
     "schemes": {
       "CIVIL_SERVANT": true,
@@ -262,7 +263,14 @@
       "CR9127676432950-5": true,
       "CR2862648617233-6": true,
       "CR6642815376412-0": true,
-      "CR4141468145498-8": true
+      "CR4141468145498-8": true,
+      "CR6907925053102-4": true,
+      "CR9235303186534-5": true,
+      "CR0391074543769-1": true,
+      "CR2389848671389-9": true,
+      "CR2814418839594-0": true,
+      "CR2999235371111-2": true,
+      "CR6164711105276-6": true
     }
   }
 }
