@@ -249,17 +249,53 @@ export class VerifiableRegistryService {
     },
   ) {
     return withChainWriteLock(async () => {
+      rememberId(kind, body.id);
+      const idHash = h(body.id);
+      const now = Math.floor(Date.now() / 1000);
+      try {
+        const authorized = await this.contractFor(kind).isAuthorized(idHash, now);
+        if (authorized) {
+          return {
+            txHash: null,
+            id: body.id,
+            kind,
+            alreadyRegistered: true,
+          };
+        }
+      } catch {
+        /* fall through and attempt register */
+      }
+
       const from = Math.floor(new Date(body.validFrom).getTime() / 1000);
       const to = Math.floor(new Date(body.validTo).getTime() / 1000);
       const contract = this.connected(kind);
-      const tx = await contract.register(h(body.id), h(body.meta || ''), from, to);
-      const receipt = await waitAndAudit(`${kind}.register`, tx, this.provider, {
-        contractName: 'VerifiableRegistry',
-        contractAddress: this.addressFor(kind),
-        extra: { kind, id: body.id },
-      });
-      rememberId(kind, body.id);
-      return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
+      try {
+        const tx = await contract.register(
+          idHash,
+          h(body.meta || ''),
+          from,
+          to,
+        );
+        const receipt = await waitAndAudit(`${kind}.register`, tx, this.provider, {
+          contractName: 'VerifiableRegistry',
+          contractAddress: this.addressFor(kind),
+          extra: { kind, id: body.id },
+        });
+        return { txHash: txHashFromReceipt(receipt), id: body.id, kind };
+      } catch (error: any) {
+        const msg = String(
+          error?.reason || error?.shortMessage || error?.message || '',
+        );
+        if (/Already active/i.test(msg)) {
+          return {
+            txHash: null,
+            id: body.id,
+            kind,
+            alreadyRegistered: true,
+          };
+        }
+        throw new InternalServerErrorException(msg || `Failed to register ${kind}`);
+      }
     });
   }
 

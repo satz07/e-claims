@@ -617,7 +617,7 @@ async function registerScheme(cursor, scheme) {
 async function registerCitizen(cursor, crId) {
   if (!crId || cursor.registered.citizens[crId]) return false;
   try {
-    await api('POST', '/api/public/citizen-registry/register', {
+    const out = await api('POST', '/api/public/citizen-registry/register', {
       id: crId,
       meta: '',
       validFrom: LICENSE_FROM,
@@ -625,11 +625,16 @@ async function registerCitizen(cursor, crId) {
     });
     cursor.registered.citizens[crId] = true;
     cursor.totals.citizensRegistered++;
-    console.log(`  + citizen ${crId}`);
+    if (out?.alreadyRegistered) {
+      console.log(`  = citizen ${crId} (already on-chain)`);
+    } else {
+      console.log(`  + citizen ${crId}`);
+    }
     return true;
   } catch (err) {
     if (/Already active|already/i.test(err.message)) {
       cursor.registered.citizens[crId] = true;
+      console.log(`  = citizen ${crId} (already on-chain)`);
       return false;
     }
     throw err;

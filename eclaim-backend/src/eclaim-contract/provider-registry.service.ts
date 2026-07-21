@@ -251,6 +251,22 @@ export class ProviderRegistryService {
     licenseValidTo: string;
   }) {
     return withChainWriteLock(async () => {
+      rememberId('provider', body.providerId);
+      const idHash = h(body.providerId);
+      const now = Math.floor(Date.now() / 1000);
+      try {
+        const authorized = await this.contract.isProviderAuthorized(idHash, now);
+        if (authorized) {
+          return {
+            txHash: null,
+            providerId: body.providerId,
+            alreadyRegistered: true,
+          };
+        }
+      } catch {
+        /* fall through */
+      }
+
       const licenseFrom = Math.floor(
         new Date(body.licenseValidFrom).getTime() / 1000,
       );
@@ -259,23 +275,37 @@ export class ProviderRegistryService {
       );
 
       const contract = this.connectedContract();
-      const tx = await contract.registerProvider(
-        h(body.providerId),
-        h(body.name),
-        h(body.level),
-        h(body.county),
-        h(body.facilityType),
-        licenseFrom,
-        licenseTo,
-      );
-      const receipt = await waitAndAudit('registerProvider', tx, this.provider, {
-        contractName: 'ProviderRegistry',
-        contractAddress: PROVIDER_REGISTRY_ADDRESS,
-        extra: { providerId: body.providerId },
-      });
-
-      rememberId('provider', body.providerId);
-      return { txHash: txHashFromReceipt(receipt), providerId: body.providerId };
+      try {
+        const tx = await contract.registerProvider(
+          idHash,
+          h(body.name),
+          h(body.level),
+          h(body.county),
+          h(body.facilityType),
+          licenseFrom,
+          licenseTo,
+        );
+        const receipt = await waitAndAudit('registerProvider', tx, this.provider, {
+          contractName: 'ProviderRegistry',
+          contractAddress: PROVIDER_REGISTRY_ADDRESS,
+          extra: { providerId: body.providerId },
+        });
+        return { txHash: txHashFromReceipt(receipt), providerId: body.providerId };
+      } catch (error: any) {
+        const msg = String(
+          error?.reason || error?.shortMessage || error?.message || '',
+        );
+        if (/Already active/i.test(msg)) {
+          return {
+            txHash: null,
+            providerId: body.providerId,
+            alreadyRegistered: true,
+          };
+        }
+        throw new InternalServerErrorException(
+          msg || 'Failed to register provider',
+        );
+      }
     });
   }
 
