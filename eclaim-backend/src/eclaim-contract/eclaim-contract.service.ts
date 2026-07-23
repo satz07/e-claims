@@ -134,7 +134,11 @@ export class EclaimContractService {
   /** Newest-first unique claim numbers from ClaimUpserted; avoids re-scan on every list page. */
   private claimNumbersCache: number[] | null = null;
   private claimNumbersCacheAtMs = 0;
-  private static readonly CLAIM_NUMBERS_TTL_MS = 60_000;
+  /** Full V1+V3 log scan is slow; keep list totals warm for several minutes. */
+  private static readonly CLAIM_NUMBERS_TTL_MS = 10 * 60_000;
+  /** Apeiro RPC rejects large eth_getLogs ranges — keep chunks small. */
+  private static readonly LOG_CHUNK_BLOCKS = 1_500;
+  private static readonly LOG_CHUNK_CONCURRENCY = 8;
 
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
@@ -458,6 +462,10 @@ export class EclaimContractService {
     }
     if (ordered.length) this.lastClaimNumberCache = max;
 
+    console.log(
+      `[eclaim] ClaimUpserted index rebuilt: ${ordered.length} unique claimNumber(s) (V3+V1)`,
+    );
+
     return ordered;
   }
 
@@ -705,22 +713,52 @@ export class EclaimContractService {
   }
 
   private async findIdHashInContract(contract: ethers.Contract, claimIdHash: string): Promise<number | null> {
-    const CHUNK = 99_000;
     const latestBlock = await this.provider.getBlockNumber();
-    const startBlock = Math.max(0, latestBlock - 500_000);
     const filter = contract.filters.ClaimUpserted(null, claimIdHash);
-    for (let from = startBlock; from <= latestBlock; from += CHUNK) {
-      const to = Math.min(from + CHUNK - 1, latestBlock);
-      try {
-        const chunk = await contract.queryFilter(filter, from, to);
-        if (chunk.length > 0) {
-          return Number((chunk[chunk.length - 1] as any).args.claimNumber);
-        }
-      } catch {
-        // skip failed chunk
-      }
+    const events = await this.queryFilterInChunks(contract, filter, 0, latestBlock);
+    if (!events.length) return null;
+    return Number((events[events.length - 1] as any).args.claimNumber);
+  }
+
+  /**
+   * eth_getLogs with small chunks + split-retry. Large ranges often return empty/fail on Apeiro.
+   */
+  private async queryFilterInChunks(
+    contract: ethers.Contract,
+    filter: any,
+    startBlock: number,
+    latestBlock: number,
+  ): Promise<any[]> {
+    const chunkSize = EclaimContractService.LOG_CHUNK_BLOCKS;
+    const concurrency = EclaimContractService.LOG_CHUNK_CONCURRENCY;
+    const ranges: Array<[number, number]> = [];
+    for (let from = startBlock; from <= latestBlock; from += chunkSize) {
+      ranges.push([from, Math.min(from + chunkSize - 1, latestBlock)]);
     }
-    return null;
+
+    const queryRange = async (from: number, to: number): Promise<any[]> => {
+      try {
+        return await contract.queryFilter(filter, from, to);
+      } catch {
+        if (to <= from) return [];
+        if (to - from <= 0) return [];
+        const mid = Math.floor((from + to) / 2);
+        if (mid < from || mid >= to) return [];
+        const [left, right] = await Promise.all([
+          queryRange(from, mid),
+          queryRange(mid + 1, to),
+        ]);
+        return [...left, ...right];
+      }
+    };
+
+    const events: any[] = [];
+    for (let i = 0; i < ranges.length; i += concurrency) {
+      const batch = ranges.slice(i, i + concurrency);
+      const parts = await Promise.all(batch.map(([from, to]) => queryRange(from, to)));
+      for (const part of parts) events.push(...part);
+    }
+    return events;
   }
 
   /** Find claimNumber by querying ClaimUpserted events filtered on claimIdHash (both contracts) */
@@ -754,24 +792,17 @@ export class EclaimContractService {
   }
 
   private async queryEventsFrom(contract: ethers.Contract) {
-    const CHUNK = 99_000;
     const latestBlock = await this.provider.getBlockNumber();
-    const startBlock = Math.max(0, latestBlock - 500_000);
-    const events: any[] = [];
-    const filter = contract.filters.ClaimUpserted();
-    for (let from = startBlock; from <= latestBlock; from += CHUNK) {
-      const to = Math.min(from + CHUNK - 1, latestBlock);
-      try {
-        const chunk = await contract.queryFilter(filter, from, to);
-        events.push(...chunk);
-      } catch {
-        // skip failed chunk
-      }
-    }
-    return events;
+    // Scan from genesis — Apeiro is still small; large lookback windows fail on this RPC.
+    return this.queryFilterInChunks(
+      contract,
+      contract.filters.ClaimUpserted(),
+      0,
+      latestBlock,
+    );
   }
 
-  /** Query ClaimUpserted events from both the current and legacy contract. */
+  /** Query ClaimUpserted events from both the current (V3) and legacy (V1) contracts. */
   private async queryClaimUpsertedEvents() {
     const allEvents = await this.queryEventsFrom(this.contract);
     if (this.legacyContract) {

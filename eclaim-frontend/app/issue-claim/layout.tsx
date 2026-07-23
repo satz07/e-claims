@@ -3,7 +3,7 @@
 
 import { ReactNode } from "react"
 import { Sidebar } from "@/components/sidebar"
-import { WalletButton } from "@/components/wallet-button"
+import { HeaderActions } from "@/components/header-actions"
 import { WalletGate } from "@/components/wallet/WalletGate"
 
 export default function IsseClaimLayout({ children }: { children: ReactNode }) {
@@ -13,7 +13,7 @@ export default function IsseClaimLayout({ children }: { children: ReactNode }) {
             <div className="flex-1 flex flex-col">
                 {/* Header */}
                 <header className="bg-white border-b border-border px-4 md:px-8 py-4 flex justify-end">
-                    <WalletButton />
+                    <HeaderActions />
                 </header>
 
                 {/* Page content */}

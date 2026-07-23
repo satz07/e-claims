@@ -1,6 +1,6 @@
 "use client"
 
-import { WalletButton } from "@/components/wallet-button"
+import { HeaderActions } from "@/components/header-actions"
 import { Database } from "lucide-react"
 
 export function Header() {
@@ -17,7 +17,7 @@ export function Header() {
               <p className="text-[10px] md:text-xs text-muted-foreground">Blockchain Records</p>
             </div>
           </div>
-          <WalletButton />
+          <HeaderActions />
         </div>
       </div>
     </header>

@@ -1,6 +1,6 @@
 import { Sidebar } from "@/components/sidebar"
 import { ClaimsSearch } from "@/components/claims-search"
-import { WalletButton } from "@/components/wallet-button"
+import { HeaderActions } from "@/components/header-actions"
 
 export default function HomePage() {
   return (
@@ -8,7 +8,7 @@ export default function HomePage() {
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <header className="bg-white border-b border-border px-4 md:px-8 py-4 flex justify-end">
-          <WalletButton />
+          <HeaderActions />
         </header>
         <main className="flex-1 px-4 md:px-8 py-6">
           <ClaimsSearch />
