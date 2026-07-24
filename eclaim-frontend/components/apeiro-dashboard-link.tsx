@@ -11,7 +11,7 @@ export function ApeiroDashboardLink() {
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-700 backdrop-blur-sm transition-colors hover:bg-emerald-500/20 hover:border-emerald-500/60 md:text-sm"
     >
-      Apeiro Dashboard
+      Onchain Health
       <ExternalLink className="h-3 w-3 opacity-70" aria-hidden />
     </a>
   )

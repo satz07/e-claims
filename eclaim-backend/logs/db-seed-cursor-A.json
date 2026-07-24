@@ -1,8 +1,8 @@
 {
-  "lastClaimNumber": 325859,
-  "lastClaimId": "617eca67-34fe-44fa-af42-1d443f2a80a9",
-  "lastBundleId": "7f3425c5-a7f9-4627-9b84-d9fcf52f2b60",
-  "lastImportedAt": "2026-07-23T22:25:52.974Z",
+  "lastClaimNumber": 325975,
+  "lastClaimId": "e2f58ba7-e3a6-4e4b-9f9f-82cd49b54aeb",
+  "lastBundleId": "d7c9eb14-0a2f-4747-a6bf-4368b7f5ca04",
+  "lastImportedAt": "2026-07-24T00:13:02.584Z",
   "range": {
     "from": 322719,
     "to": 340777,
@@ -10,13 +10,13 @@
   },
   "worker": "A",
   "totals": {
-    "claimsOk": 784,
+    "claimsOk": 802,
     "preauthsOk": 75,
-    "errors": 2114,
-    "skipped": 130,
+    "errors": 2200,
+    "skipped": 142,
     "providersRegistered": 213,
     "schemesRegistered": 15,
-    "citizensRegistered": 568
+    "citizensRegistered": 588
   },
   "registered": {
     "providers": {
@@ -819,7 +819,27 @@
       "CR2303761060245-0": true,
       "CR1978182943716-8": true,
       "CR1292212197567-2": true,
-      "CR2565943316779-7": true
+      "CR2565943316779-7": true,
+      "CR9386669479174-7": true,
+      "CR6833200131041-7": true,
+      "CR1170955738471-4": true,
+      "CR3396343700436-4": true,
+      "CR9055446729980-8": true,
+      "CR7091346127345-4": true,
+      "CR1503824595231-0": true,
+      "CR0078896547255-3": true,
+      "CR3624734340036-2": true,
+      "CR2708101195597-2": true,
+      "CR7858969927760-8": true,
+      "CR7374913738136-3": true,
+      "CR2178824124666-9": true,
+      "BZ22334289-0": true,
+      "CR6426395711505-0": true,
+      "CR6963201527420-5": true,
+      "CR5982427200531-3": true,
+      "CR5391324902813-0": true,
+      "CR8495119113620-7": true,
+      "CR0318610611450-6": true
     }
   }
 }
