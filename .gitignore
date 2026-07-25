@@ -41,6 +41,9 @@ eclaim-frontend/.env.local
 # Temp / scratch
 .tmp-*
 *.tmp.json
+eclaim-backend/dumps/*.jsonl
+eclaim-backend/dumps/*.meta.json
+!eclaim-backend/dumps/README.md
 
 # OS
 .DS_Store

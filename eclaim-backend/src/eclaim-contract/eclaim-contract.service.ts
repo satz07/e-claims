@@ -19,7 +19,7 @@ import { ProviderRegistryService } from './provider-registry.service';
 import { VerifiableRegistryService } from './verifiable-registry.service';
 import { getActiveChain } from './chain-config';
 import { logChainTransaction } from './tx-audit-log';
-import { withChainWriteLock } from './chain-write-lock';
+import { extendChainWriteLock, withChainWriteLock } from './chain-write-lock';
 
 const META_FILE = path.join(process.cwd(), 'claim-meta.json');
 
@@ -327,12 +327,20 @@ export class EclaimContractService {
     };
   }
 
+  /** Reuse one Wallet so nonce tracking stays consistent across submits. */
+  private cachedSigner: ethers.Wallet | null = null;
+
   private getSigner() {
+    if (this.cachedSigner) return this.cachedSigner;
     const key = process.env.OWNER_PRIVATE_KEY;
     if (!key) {
       throw new BadRequestException('OWNER_PRIVATE_KEY is not configured on the server');
     }
-    return new ethers.Wallet(key, this.provider);
+    this.cachedSigner = new ethers.Wallet(
+      key.startsWith('0x') ? key : `0x${key}`,
+      this.provider,
+    );
+    return this.cachedSigner;
   }
 
   private async assertSufficientGas(
@@ -639,7 +647,10 @@ export class EclaimContractService {
       };
 
       if (!wait) {
-        void tx
+        // Return after broadcast, but keep chain-write lock until mined.
+        // Apeiro RPC often lacks pending nonces; releasing early causes
+        // "nonce is not consistent" / "insufficient gas price to replace".
+        const mined = tx
           .wait()
           .then(async (receipt) => {
             if (!receipt) return;
@@ -662,6 +673,7 @@ export class EclaimContractService {
           .catch((err) => {
             console.error('[submitFhirBundle] async receipt failed', err?.message || err);
           });
+        extendChainWriteLock(mined);
         return base;
       }
 
