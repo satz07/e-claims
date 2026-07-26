@@ -135,7 +135,7 @@ export class EclaimContractService {
   private claimNumbersCache: number[] | null = null;
   private claimNumbersCacheAtMs = 0;
   /** Full V1+V3 log scan is slow; keep list totals warm for several minutes. */
-  private static readonly CLAIM_NUMBERS_TTL_MS = 10 * 60_000;
+  private static readonly CLAIM_NUMBERS_TTL_MS = 2 * 60_000;
   /** Apeiro RPC rejects large eth_getLogs ranges — keep chunks small. */
   private static readonly LOG_CHUNK_BLOCKS = 1_500;
   private static readonly LOG_CHUNK_CONCURRENCY = 8;
@@ -191,6 +191,7 @@ export class EclaimContractService {
 
   cacheClaimMeta(claimNumber: number, meta: ClaimMeta) {
     this.metaCache.set(claimNumber, { ...meta, source: meta.source ?? 'fhir' });
+    this.rememberClaimNumber(Number(claimNumber));
     this.saveMetaToDisk();
   }
 
@@ -695,6 +696,119 @@ export class EclaimContractService {
       });
 
       return { ...base, txHash: receipt.hash, pending: false };
+    });
+  }
+
+  /**
+   * Anchor many FHIR bundles in a single ClaimRegistry.upsertClaims transaction.
+   * Used by generate-claims-batch.mjs so Nest logs show batch activity.
+   */
+  async submitFhirBundleBatch(bundles: unknown[]) {
+    if (!Array.isArray(bundles) || bundles.length === 0) {
+      throw new BadRequestException('Body must include non-empty bundles: Bundle[]');
+    }
+    if (bundles.length > 50) {
+      throw new BadRequestException('Max 50 bundles per batch');
+    }
+
+    const parsedList = bundles.map((raw, i) => {
+      try {
+        return parseFhirBundle(raw);
+      } catch (e: any) {
+        throw new BadRequestException(`Bundle[${i}]: ${e?.message || e}`);
+      }
+    });
+
+    for (const parsed of parsedList) {
+      const isDuplicate = await this.checkDuplicate(parsed.claimId, parsed.recordUse);
+      if (isDuplicate) {
+        throw new BadRequestException(
+          `Record already anchored for id "${parsed.claimId}"`,
+        );
+      }
+      await this.assertRegistriesAuthorize(parsed);
+    }
+
+    return this.withSubmitLock(async () => {
+      const claimNumbers: bigint[] = [];
+      const structs = [];
+      for (const parsed of parsedList) {
+        const claimNumber = await this.nextClaimNumber();
+        claimNumbers.push(claimNumber);
+        structs.push(buildClaimStruct(parsed, claimNumber));
+      }
+
+      const signer = this.getSigner();
+      await this.assertSignerIsAuthorized(signer);
+      const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
+
+      let gasLimit: bigint;
+      try {
+        gasLimit = await contractWithSigner.upsertClaims.estimateGas(structs);
+      } catch (e: any) {
+        throw new BadRequestException(
+          `upsertClaims estimateGas failed: ${e?.shortMessage || e?.message || e}`,
+        );
+      }
+      const feeData = await this.provider.getFeeData();
+      const gasPrice = feeData.gasPrice ?? 1_000_000_000n;
+      const balance = await this.provider.getBalance(await signer.getAddress());
+      const required = gasPrice * ((gasLimit * 130n) / 100n);
+      if (balance < required) {
+        throw new BadRequestException(
+          `Insufficient balance for batch gas (need ~${ethers.formatEther(required)} ADI)`,
+        );
+      }
+
+      console.log(
+        `[submitFhirBundleBatch] sending ${structs.length} claims in ONE upsertClaims tx…`,
+      );
+      const tx = await contractWithSigner.upsertClaims(structs, {
+        gasLimit: (gasLimit * 130n) / 100n,
+      });
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new BadRequestException('upsertClaims transaction failed');
+      }
+
+      const items = parsedList.map((parsed, i) => {
+        const claimNumber = claimNumbers[i];
+        const meta = this.fhirMetaFromParsed(parsed);
+        this.cacheClaimMeta(Number(claimNumber), meta);
+        return {
+          claimNumber: claimNumber.toString(),
+          claimId: parsed.claimId,
+          recordUse: parsed.recordUse,
+          fid: parsed.fid,
+          claimedTotal: parsed.claimedTotal.toString(),
+        };
+      });
+
+      await logChainTransaction({
+        label: `submitFhirBundleBatch / upsertClaims (n=${structs.length})`,
+        contractName: 'ClaimRegistry',
+        contractAddress: CONTRACT_ADDRESS,
+        tx,
+        receipt,
+        provider: this.provider,
+        extra: {
+          batchSize: structs.length,
+          claimNumbers: items.map((x) => x.claimNumber),
+          claimIds: items.map((x) => x.claimId),
+        },
+      });
+
+      console.log(
+        `[submitFhirBundleBatch] OK block=${receipt.blockNumber} tx=${tx.hash} n=${structs.length}`,
+      );
+
+      return {
+        txHash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        batchSize: structs.length,
+        pending: false,
+        items,
+      };
     });
   }
 

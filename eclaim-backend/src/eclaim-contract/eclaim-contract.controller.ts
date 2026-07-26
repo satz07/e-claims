@@ -24,6 +24,16 @@ export class EclaimContractController {
     return this.service.submitFhirBundle(body, { wait: wait !== 'false' });
   }
 
+  /**
+   * Batch anchor: many FHIR bundles in ONE upsertClaims tx.
+   * Body: { bundles: [ Bundle, Bundle, ... ] } (max 50)
+   */
+  @Post('submit-batch')
+  @HttpCode(201)
+  async submitFhirBatch(@Body() body: { bundles?: unknown[] }) {
+    return this.service.submitFhirBundleBatch(body?.bundles ?? []);
+  }
+
   @Get()
   async getAllClaims(
     @Query('page') page = '0',
