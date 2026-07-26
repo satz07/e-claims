@@ -84,6 +84,52 @@ function appendLog(lines) {
   fs.appendFileSync(LOG_FILE, lines.join('\n') + '\n');
 }
 
+const PROGRESS_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
+
+/** Shared counters + periodic "how many pushed" log (console + bulk-seed-runs.log). */
+function createProgressReporter({ claimsTarget, preauthsTarget }) {
+  const state = {
+    phase: 'starting',
+    claimsOk: 0,
+    preauthsOk: 0,
+    errors: 0,
+    startedAt: Date.now(),
+  };
+
+  const emit = (label = 'PROGRESS') => {
+    const elapsedMin = ((Date.now() - state.startedAt) / 60000).toFixed(1);
+    const totalOk = state.claimsOk + state.preauthsOk;
+    const line =
+      `${label}  ${new Date().toISOString()}  elapsed=${elapsedMin}m  ` +
+      `phase=${state.phase}  ` +
+      `claims=${state.claimsOk}/${claimsTarget}  ` +
+      `preauths=${state.preauthsOk}/${preauthsTarget}  ` +
+      `pushed=${totalOk}  errors=${state.errors}`;
+    console.log(`\n⏱  ${line}\n`);
+    appendLog([line]);
+  };
+
+  const timer = setInterval(() => emit('PROGRESS 30m'), PROGRESS_INTERVAL_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+
+  return {
+    setPhase(phase) {
+      state.phase = phase;
+    },
+    addOk(use, n) {
+      if (use === 'claim') state.claimsOk += n;
+      else state.preauthsOk += n;
+    },
+    addErrors(n) {
+      state.errors += n;
+    },
+    snapshot: emit,
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 function defaultPool() {
   const providers = [
     {
@@ -347,11 +393,12 @@ async function ensureMorePool(pool, extra) {
   return pool;
 }
 
-async function submitBatches(use, count, batchSize, pool) {
+async function submitBatches(use, count, batchSize, pool, progress) {
   let ok = 0;
   let errors = 0;
   let batchesOk = 0;
   const totalBatches = Math.ceil(count / batchSize) || 0;
+  progress?.setPhase(use);
 
   for (let b = 0; b < totalBatches; b++) {
     const start = b * batchSize;
@@ -378,6 +425,7 @@ async function submitBatches(use, count, batchSize, pool) {
       const n = out.batchSize || out.items?.length || size;
       ok += n;
       batchesOk++;
+      progress?.addOk(use, n);
       const tx = out.txHash || '';
       console.log(
         `  ${use} batch ${b + 1}/${totalBatches} size=${n} ` +
@@ -386,6 +434,7 @@ async function submitBatches(use, count, batchSize, pool) {
       );
     } catch (err) {
       errors += size;
+      progress?.addErrors(size);
       console.error(`  ${use} batch ${b + 1}/${totalBatches} ERR ${err.message}`);
     }
   }
@@ -432,37 +481,62 @@ async function main() {
     `script     generate-claims-batch.mjs (via Nest submit-batch)`,
     `backend    ${BACKEND}`,
     `requested  claims=${args.claims} preauths=${args.preauths} batchSize=${args.batchSize}`,
+    `progress   every ${PROGRESS_INTERVAL_MS / 60000} min → console + logs/bulk-seed-runs.log`,
   ]);
 
-  const claimStats = await submitBatches('claim', args.claims, args.batchSize, pool);
-  const preauthStats = await submitBatches(
-    'preauthorization',
-    args.preauths,
-    args.batchSize,
-    pool,
-  );
-
-  const end = new Date();
-  const durationSec = (end.getTime() - start.getTime()) / 1000;
-  const totalOk = claimStats.ok + preauthStats.ok;
-  const totalErr = claimStats.errors + preauthStats.errors;
-  const totalBatches = claimStats.batchesOk + preauthStats.batchesOk;
-
-  appendLog([
-    `RUN END    ${end.toISOString()}`,
-    `durationSec  ${durationSec.toFixed(1)}`,
-    `created  claims=${claimStats.ok} preauths=${preauthStats.ok} total=${totalOk} errors=${totalErr}`,
-    `batchesOk  ${totalBatches}`,
-    '════════════════════════════════════════════════════════════',
-  ]);
-
-  console.log('');
+  const progress = createProgressReporter({
+    claimsTarget: args.claims,
+    preauthsTarget: args.preauths,
+  });
   console.log(
-    `Done claims=${claimStats.ok} preauths=${preauthStats.ok} errors=${totalErr} ` +
-      `batches=${totalBatches} in ${(durationSec / 60).toFixed(1)} min`,
+    `Progress log every ${PROGRESS_INTERVAL_MS / 60000} min → console + logs/bulk-seed-runs.log`,
   );
-  console.log(`Watch Nest terminal for: submitFhirBundleBatch / upsertClaims`);
-  console.log(`Refresh frontend claims list to see new rows.`);
+
+  try {
+    const claimStats = await submitBatches(
+      'claim',
+      args.claims,
+      args.batchSize,
+      pool,
+      progress,
+    );
+    const preauthStats = await submitBatches(
+      'preauthorization',
+      args.preauths,
+      args.batchSize,
+      pool,
+      progress,
+    );
+
+    const end = new Date();
+    const durationSec = (end.getTime() - start.getTime()) / 1000;
+    const totalOk = claimStats.ok + preauthStats.ok;
+    const totalErr = claimStats.errors + preauthStats.errors;
+    const totalBatches = claimStats.batchesOk + preauthStats.batchesOk;
+
+    progress.setPhase('done');
+    progress.snapshot('PROGRESS FINAL');
+    progress.stop();
+
+    appendLog([
+      `RUN END    ${end.toISOString()}`,
+      `durationSec  ${durationSec.toFixed(1)}`,
+      `created  claims=${claimStats.ok} preauths=${preauthStats.ok} total=${totalOk} errors=${totalErr}`,
+      `batchesOk  ${totalBatches}`,
+      '════════════════════════════════════════════════════════════',
+    ]);
+
+    console.log('');
+    console.log(
+      `Done claims=${claimStats.ok} preauths=${preauthStats.ok} errors=${totalErr} ` +
+        `batches=${totalBatches} in ${(durationSec / 60).toFixed(1)} min`,
+    );
+    console.log(`Watch Nest terminal for: submitFhirBundleBatch / upsertClaims`);
+    console.log(`Refresh frontend claims list to see new rows.`);
+  } catch (e) {
+    progress.stop();
+    throw e;
+  }
 }
 
 main().catch((e) => {
