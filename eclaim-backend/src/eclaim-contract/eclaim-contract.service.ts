@@ -506,7 +506,11 @@ export class EclaimContractService {
 
   /** Validate facility + citizen + scheme against hash registries before gas spend. */
   private async assertRegistriesAuthorize(parsed: ReturnType<typeof parseFhirBundle>) {
-    const atTime = Number(parsed.dateFrom) || Math.floor(Date.now() / 1000);
+    const claimAt = Number(parsed.dateFrom) || Math.floor(Date.now() / 1000);
+    const now = Math.floor(Date.now() / 1000);
+    // DB seed rows often pre-date on-chain registry licenses; optional import-time check.
+    const atTime =
+      process.env.REGISTRY_VALIDATE_AT_CLAIM_DATE === 'false' ? now : claimAt;
     const strict = process.env.REGISTRY_VALIDATION_ENABLED !== 'false';
 
     if (strict) {

@@ -4,6 +4,7 @@
  * Resume files:
  *   logs/db-seed-progress.json   — lastClaimNumber / import totals (ONLY updated by --limit)
  *   logs/db-seed-registries.json — providers/schemes/citizens cache (--register-only safe)
+ *   logs/db-seed-imported.json     — claim_id index of OK/DUP rows (skip on-chain on re-run)
  *   logs/db-seed-cursor.json     — combined snapshot for humans (rebuilt on save)
  *   With --worker NAME (or --from/--to): progress/cursor/records/runs use *-NAME suffixes;
  *   registries stay shared.
@@ -48,6 +49,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const LOG_DIR = path.join(root, 'logs');
 const REGISTRY_FILE = path.join(LOG_DIR, 'db-seed-registries.json');
+const IMPORTED_FILE = path.join(LOG_DIR, 'db-seed-imported.json');
 
 /** Set by configureWorkerPaths() after parsing --worker / --from / --to. */
 let CURSOR_FILE = path.join(LOG_DIR, 'db-seed-cursor.json');
@@ -122,7 +124,7 @@ const DB = {
       : { rejectUnauthorized: process.env.CLAIM_DB_SSL_REJECT_UNAUTHORIZED === 'true' },
 };
 
-const LICENSE_FROM = '2020-01-01';
+const LICENSE_FROM = '2010-01-01';
 const LICENSE_TO = '2035-12-31';
 
 function appendLines(file, lines) {
@@ -150,6 +152,9 @@ function defaultRegistries() {
     providers: {},
     schemes: {},
     citizens: {},
+    providerLicenses: {},
+    citizenLicenses: {},
+    schemeLicenses: {},
   };
 }
 
@@ -169,11 +174,42 @@ function writeJsonAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
+function loadImportedIndex() {
+  if (!fs.existsSync(IMPORTED_FILE)) return { claims: {}, updatedAt: null };
+  try {
+    const data = JSON.parse(fs.readFileSync(IMPORTED_FILE, 'utf8'));
+    return { claims: data.claims || {}, updatedAt: data.updatedAt || null };
+  } catch {
+    return { claims: {}, updatedAt: null };
+  }
+}
+
+/** Shared claim_id → on-chain success index (OK + DUP). Survives worker/log resets. */
+function markImported(importedIndex, row, use, status, extra = {}) {
+  importedIndex.claims[row.claim_id] = {
+    claimNumber: Number(row.claim_number),
+    use,
+    status,
+    at: new Date().toISOString(),
+    worker: WORKER_ID,
+    ...extra,
+  };
+  importedIndex.updatedAt = new Date().toISOString();
+  writeJsonAtomic(IMPORTED_FILE, importedIndex);
+}
+
+function isImported(importedIndex, claimId) {
+  return Boolean(claimId && importedIndex.claims[claimId]);
+}
+
 function deepMergeRegistered(a = {}, b = {}) {
   return {
     providers: { ...(a.providers || {}), ...(b.providers || {}) },
     schemes: { ...(a.schemes || {}), ...(b.schemes || {}) },
     citizens: { ...(a.citizens || {}), ...(b.citizens || {}) },
+    providerLicenses: { ...(a.providerLicenses || {}), ...(b.providerLicenses || {}) },
+    citizenLicenses: { ...(a.citizenLicenses || {}), ...(b.citizenLicenses || {}) },
+    schemeLicenses: { ...(a.schemeLicenses || {}), ...(b.schemeLicenses || {}) },
   };
 }
 
@@ -566,11 +602,14 @@ function buildBundle(row) {
   };
 }
 
-async function registerProvider(cursor, row) {
+async function ensureProviderLicense(cursor, row) {
   const fid = row.fid_code;
-  if (!fid || cursor.registered.providers[fid]) return false;
+  if (!fid) return false;
+  if (!cursor.registered.providerLicenses) cursor.registered.providerLicenses = {};
+
+  let changed = false;
   try {
-    await api('POST', '/api/public/provider-registry/register', {
+    const out = await api('POST', '/api/public/provider-registry/register', {
       providerId: fid,
       name: row.provider_name || fid,
       level: normalizeLevel(row.facility_level || row.provider_level),
@@ -580,82 +619,146 @@ async function registerProvider(cursor, row) {
       licenseValidTo: LICENSE_TO,
     });
     cursor.registered.providers[fid] = true;
-    cursor.totals.providersRegistered++;
-    console.log(`  + provider ${fid}`);
-    return true;
+    if (out?.txHash) {
+      changed = true;
+      console.log(`  + provider ${fid}`);
+    } else if (out?.alreadyRegistered) {
+      console.log(`  = provider ${fid} (on-chain)`);
+    }
   } catch (err) {
     if (/Already active|already/i.test(err.message)) {
       cursor.registered.providers[fid] = true;
-      return false;
-    }
-    throw err;
-  }
-}
-
-async function registerScheme(cursor, scheme) {
-  if (!scheme || cursor.registered.schemes[scheme]) return false;
-  try {
-    await api('POST', '/api/public/insurer-registry/register', {
-      id: scheme,
-      meta: '',
-      validFrom: LICENSE_FROM,
-      validTo: LICENSE_TO,
-    });
-    cursor.registered.schemes[scheme] = true;
-    cursor.totals.schemesRegistered++;
-    console.log(`  + scheme ${scheme}`);
-    return true;
-  } catch (err) {
-    if (/Already active|already/i.test(err.message)) {
-      cursor.registered.schemes[scheme] = true;
-      return false;
-    }
-    throw err;
-  }
-}
-
-async function registerCitizen(cursor, crId) {
-  if (!crId || cursor.registered.citizens[crId]) return false;
-  try {
-    const out = await api('POST', '/api/public/citizen-registry/register', {
-      id: crId,
-      meta: '',
-      validFrom: LICENSE_FROM,
-      validTo: LICENSE_TO,
-    });
-    cursor.registered.citizens[crId] = true;
-    cursor.totals.citizensRegistered++;
-    if (out?.alreadyRegistered) {
-      console.log(`  = citizen ${crId} (already on-chain)`);
     } else {
-      console.log(`  + citizen ${crId}`);
+      throw err;
     }
-    return true;
+  }
+
+  if (cursor.registered.providerLicenses[fid] !== LICENSE_FROM) {
+    const lic = await api(
+      'POST',
+      `/api/public/provider-registry/${encodeURIComponent(fid)}/license`,
+      { licenseValidFrom: LICENSE_FROM, licenseValidTo: LICENSE_TO },
+    );
+    cursor.registered.providerLicenses[fid] = LICENSE_FROM;
+    if (lic?.txHash) {
+      changed = true;
+      console.log(`  ~ provider ${fid} license ${LICENSE_FROM} → ${LICENSE_TO}`);
+    }
+  }
+
+  return changed;
+}
+
+/** @deprecated use ensureProviderLicense */
+async function registerProvider(cursor, row) {
+  return ensureProviderLicense(cursor, row);
+}
+
+async function ensureCitizenLicense(cursor, crId) {
+  if (!crId) return false;
+  if (!cursor.registered.citizenLicenses) cursor.registered.citizenLicenses = {};
+
+  const body = {
+    id: crId,
+    meta: '',
+    validFrom: LICENSE_FROM,
+    validTo: LICENSE_TO,
+  };
+
+  if (cursor.registered.citizenLicenses[crId] === LICENSE_FROM) {
+    cursor.registered.citizens[crId] = true;
+    return false;
+  }
+
+  let changed = false;
+  try {
+    const out = await api('POST', '/api/public/citizen-registry/register', body);
+    if (out?.txHash) {
+      changed = true;
+      console.log(`  + citizen ${crId}`);
+    } else if (out?.alreadyRegistered) {
+      await api('POST', `/api/public/citizen-registry/${encodeURIComponent(crId)}/deregister`);
+      await api('POST', '/api/public/citizen-registry/register', body);
+      changed = true;
+      console.log(`  ~ citizen ${crId} license ${LICENSE_FROM} → ${LICENSE_TO}`);
+    }
   } catch (err) {
     if (/Already active|already/i.test(err.message)) {
       cursor.registered.citizens[crId] = true;
-      console.log(`  = citizen ${crId} (already on-chain)`);
-      return false;
+    } else {
+      throw err;
     }
-    throw err;
   }
+
+  cursor.registered.citizens[crId] = true;
+  cursor.registered.citizenLicenses[crId] = LICENSE_FROM;
+  return changed;
+}
+
+async function registerCitizen(cursor, crId) {
+  return ensureCitizenLicense(cursor, crId);
+}
+
+async function ensureSchemeLicense(cursor, scheme) {
+  if (!scheme) return false;
+  if (!cursor.registered.schemeLicenses) cursor.registered.schemeLicenses = {};
+
+  const body = {
+    id: scheme,
+    meta: '',
+    validFrom: LICENSE_FROM,
+    validTo: LICENSE_TO,
+  };
+
+  if (cursor.registered.schemeLicenses[scheme] === LICENSE_FROM) {
+    cursor.registered.schemes[scheme] = true;
+    return false;
+  }
+
+  let changed = false;
+  try {
+    const out = await api('POST', '/api/public/insurer-registry/register', body);
+    if (out?.txHash) {
+      changed = true;
+      console.log(`  + scheme ${scheme}`);
+    } else if (out?.alreadyRegistered) {
+      await api('POST', `/api/public/insurer-registry/${encodeURIComponent(scheme)}/deregister`);
+      await api('POST', '/api/public/insurer-registry/register', body);
+      changed = true;
+      console.log(`  ~ scheme ${scheme} license ${LICENSE_FROM} → ${LICENSE_TO}`);
+    }
+  } catch (err) {
+    if (/Already active|already/i.test(err.message)) {
+      cursor.registered.schemes[scheme] = true;
+    } else {
+      throw err;
+    }
+  }
+
+  cursor.registered.schemes[scheme] = true;
+  cursor.registered.schemeLicenses[scheme] = LICENSE_FROM;
+  return changed;
+}
+
+async function registerScheme(cursor, scheme) {
+  return ensureSchemeLicense(cursor, scheme);
 }
 
 async function ensureLazyCitizen(cursor, crId, errMessage) {
   if (!/Citizen CR|not registered|not authorized/i.test(errMessage)) return false;
-  await registerCitizen(cursor, crId);
+  await ensureCitizenLicense(cursor, crId);
   return true;
 }
 
 async function ensureLazyProvider(cursor, row, errMessage) {
   if (!/Facility|Provider|not registered|not authorized/i.test(errMessage)) return false;
-  await registerProvider(cursor, row);
+  await ensureProviderLicense(cursor, row);
   return true;
 }
 
 async function ensureLazyScheme(cursor, scheme, errMessage) {
   if (!/Scheme|not registered|not authorized/i.test(errMessage)) return false;
-  await registerScheme(cursor, scheme);
+  await ensureSchemeLicense(cursor, scheme);
   return true;
 }
 
@@ -852,6 +955,8 @@ async function printStatus(client, cursor, args = {}) {
   console.log(`lastImportedAt:  ${cursor.lastImportedAt || '—'}`);
   console.log(`totals ok:       claims=${cursor.totals.claimsOk} preauths=${cursor.totals.preauthsOk} errors=${cursor.totals.errors}`);
   console.log(`registries:      providers=${Object.keys(cursor.registered.providers).length} schemes=${Object.keys(cursor.registered.schemes).length} citizens=${Object.keys(cursor.registered.citizens).length}`);
+  const imported = loadImportedIndex();
+  console.log(`imported index:  ${Object.keys(imported.claims).length} claim_ids (${IMPORTED_FILE})`);
   console.log(`remaining:       claims=${r.claims_left} preauths=${r.preauths_left} total=${r.total_left}`);
   console.log(`next claim#:     ${r.next_claim_number ?? 'done'}`);
   if (args.to != null && cursor.lastClaimNumber >= args.to) {
@@ -944,7 +1049,7 @@ async function registerOnly(client, cursor) {
 
   for (const scheme of schemes) {
     try {
-      await registerScheme(cursor, scheme);
+      await ensureSchemeLicense(cursor, scheme);
     } catch (err) {
       console.error(`  scheme fail ${scheme}: ${err.message}`);
     }
@@ -953,7 +1058,7 @@ async function registerOnly(client, cursor) {
 
   for (const row of providers) {
     try {
-      await registerProvider(cursor, row);
+      await ensureProviderLicense(cursor, row);
     } catch (err) {
       console.error(`  provider fail ${row.fid_code}: ${err.message}`);
     }
@@ -999,17 +1104,17 @@ async function importBatch(client, cursor, args) {
     for (const r of rows) {
       if (r.fid_code && !providers.has(r.fid_code)) providers.set(r.fid_code, r);
     }
-    console.log(`Ensuring registries for batch: schemes=${schemes.length} providers=${providers.size} (citizens=lazy)`);
+    console.log(`Ensuring registries for run: schemes=${schemes.length} providers=${providers.size} (citizens=lazy)`);
     for (const s of schemes) {
       try {
-        await registerScheme(cursor, s);
+        await ensureSchemeLicense(cursor, s);
       } catch (err) {
         console.error(`  scheme ${s}: ${err.message}`);
       }
     }
     for (const row of providers.values()) {
       try {
-        await registerProvider(cursor, row);
+        await ensureProviderLicense(cursor, row);
       } catch (err) {
         console.error(`  provider ${row.fid_code}: ${err.message}`);
       }
@@ -1029,16 +1134,19 @@ async function importBatch(client, cursor, args) {
     `use        ${args.use}`,
     `noWait     ${args.noWait}`,
     `cursorFrom ${cursor.lastClaimNumber}`,
-    `batchFirst ${rows[0].claim_number} ${rows[0].claim_id}`,
-    `batchLast  ${rows[rows.length - 1].claim_number} ${rows[rows.length - 1].claim_id}`,
+    `submitMode one-by-one`,
+    `firstClaim ${rows[0].claim_number} ${rows[0].claim_id}`,
+    `lastClaim  ${rows[rows.length - 1].claim_number} ${rows[rows.length - 1].claim_id}`,
     `wallet     ${balBefore?.address || 'n/a'}`,
     `balanceBefore  ${balBefore?.adi ?? 'n/a'} ADI`,
   ]);
 
   let ok = 0;
   let errors = 0;
+  let localSkipped = 0;
   let claimsOk = 0;
   let preauthsOk = 0;
+  const importedIndex = loadImportedIndex();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -1080,9 +1188,37 @@ async function importBatch(client, cursor, args) {
 
     // Lazy citizen before first attempt (cheaper than fail+retry for most rows)
     try {
-      await registerCitizen(cursor, row.cr_id);
+      await ensureCitizenLicense(cursor, row.cr_id);
     } catch (err) {
       console.error(`  citizen ${row.cr_id}: ${err.message}`);
+    }
+
+    if (isImported(importedIndex, row.claim_id)) {
+      const prev = importedIndex.claims[row.claim_id];
+      localSkipped++;
+      ok++;
+      if (use === 'claim') {
+        claimsOk++;
+        cursor.totals.claimsOk++;
+      } else {
+        preauthsOk++;
+        cursor.totals.preauthsOk++;
+      }
+      appendLines(RECORD_LOG, [
+        `${ts} LOCAL claim_number=${row.claim_number} claim_id=${row.claim_id} use=${use} note=indexed_${prev.status || 'ok'}`,
+      ]);
+      console.log(`  ${label} LOCAL (indexed ${prev.status || 'ok'}, skip on-chain)`);
+      cursor.lastClaimNumber = Number(row.claim_number);
+      cursor.lastClaimId = row.claim_id;
+      cursor.lastBundleId = row.bundle_id;
+      cursor.lastImportedAt = ts;
+      saveCursor(cursor);
+      if ((i + 1) % 10 === 0 || i + 1 === rows.length) {
+        console.log(
+          `  progress ${i + 1}/${rows.length} ok=${ok} local=${localSkipped} err=${errors} cursor=#${cursor.lastClaimNumber}`,
+        );
+      }
+      continue;
     }
 
     const bundle = buildBundle(row);
@@ -1103,6 +1239,10 @@ async function importBatch(client, cursor, args) {
         appendLines(RECORD_LOG, [
           `${ts} OK claim_number=${row.claim_number} claim_id=${row.claim_id} use=${use} fid=${row.fid_code} cr=${row.cr_id} scheme=${row.scheme_code} amount=${row.claimed_total} tx=${out.txHash || ''} claimNumberOnChain=${out.claimNumber || ''}`,
         ]);
+        markImported(importedIndex, row, use, 'ok', {
+          tx: out.txHash || '',
+          claimNumberOnChain: out.claimNumber || '',
+        });
         console.log(`  ${label} OK tx=${out.txHash?.slice(0, 12) || 'n/a'}…`);
         break;
       } catch (err) {
@@ -1122,6 +1262,7 @@ async function importBatch(client, cursor, args) {
           appendLines(RECORD_LOG, [
             `${ts} DUP claim_number=${row.claim_number} claim_id=${row.claim_id} use=${use} note=already_on_chain`,
           ]);
+          markImported(importedIndex, row, use, 'dup');
           console.log(`  ${label} DUP (already on-chain)`);
           break;
         }
@@ -1151,7 +1292,7 @@ async function importBatch(client, cursor, args) {
       console.error(`  ${label} ERR ${lastError?.message}`);
     }
 
-    // Always advance cursor past this claim_number so next batch continues
+    // Always advance cursor past this claim_number so the next run continues
     cursor.lastClaimNumber = Number(row.claim_number);
     cursor.lastClaimId = row.claim_id;
     cursor.lastBundleId = row.bundle_id;
@@ -1159,7 +1300,9 @@ async function importBatch(client, cursor, args) {
     saveCursor(cursor);
 
     if ((i + 1) % 10 === 0 || i + 1 === rows.length) {
-      console.log(`  progress ${i + 1}/${rows.length} ok=${ok} err=${errors} cursor=#${cursor.lastClaimNumber}`);
+      console.log(
+        `  progress ${i + 1}/${rows.length} ok=${ok} local=${localSkipped} err=${errors} cursor=#${cursor.lastClaimNumber}`,
+      );
     }
   }
 
@@ -1175,7 +1318,8 @@ async function importBatch(client, cursor, args) {
     `RUN END    ${end.toISOString()}`,
     `durationSec  ${durationSec.toFixed(1)}`,
     `durationHuman  ${(durationSec / 60).toFixed(2)} min`,
-    `batchResult  ok=${ok} claims=${claimsOk} preauths=${preauthsOk} errors=${errors}`,
+    `runResult  ok=${ok} claims=${claimsOk} preauths=${preauthsOk} localSkipped=${localSkipped} errors=${errors}`,
+    `importedIndex ${Object.keys(importedIndex.claims).length} claim_ids → ${IMPORTED_FILE}`,
     `cursorTo   ${cursor.lastClaimNumber} ${cursor.lastClaimId}`,
     `lifetime   claims=${cursor.totals.claimsOk} preauths=${cursor.totals.preauthsOk} errors=${cursor.totals.errors}`,
     `balanceAfter   ${balAfter?.adi ?? 'n/a'} ADI`,
@@ -1183,8 +1327,9 @@ async function importBatch(client, cursor, args) {
     '════════════════════════════════════════════════════════════',
   ]);
 
-  console.log('\nBatch done.');
-  console.log(`ok=${ok} (claims=${claimsOk} preauths=${preauthsOk}) errors=${errors}`);
+  console.log('\nImport run done (one-by-one submit).');
+  console.log(`ok=${ok} (claims=${claimsOk} preauths=${preauthsOk}) localSkipped=${localSkipped} errors=${errors}`);
+  console.log(`imported index: ${Object.keys(importedIndex.claims).length} claim_ids → ${IMPORTED_FILE}`);
   console.log(`cursor now claim_number=${cursor.lastClaimNumber}`);
   console.log(`duration ${(durationSec / 60).toFixed(2)} min`);
   console.log(`record log: ${RECORD_LOG}`);

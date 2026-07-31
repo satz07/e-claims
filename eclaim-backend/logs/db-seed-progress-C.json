@@ -1,0 +1,17 @@
+{
+  "lastClaimNumber": 361941,
+  "lastClaimId": "ea01c40e-4adf-4171-955e-f3be65edc2de",
+  "lastBundleId": "63f66529-cebc-4c95-99c8-b5ff4eece7c6",
+  "lastImportedAt": "2026-07-31T10:39:45.875Z",
+  "totals": {
+    "claimsOk": 3012,
+    "preauthsOk": 0,
+    "errors": 40,
+    "skipped": 50
+  },
+  "range": {
+    "from": 358837,
+    "to": 376895,
+    "worker": "C"
+  }
+}
