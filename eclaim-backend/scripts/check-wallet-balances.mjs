@@ -155,72 +155,141 @@ function shouldAlert(state, address) {
   return ageMs >= COOLDOWN_MIN * 60_000;
 }
 
-async function sendAlert(transporter, rows) {
+function shortAddr(a) {
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+function explorerUrl(address) {
+  return `https://explorer.adifoundation.ai/address/${address}`;
+}
+
+/** Email-safe horizontal bar (0–100% of a display max). */
+function balanceBar(adiNum, maxForScale) {
+  const pct = Math.max(2, Math.min(100, Math.round((adiNum / maxForScale) * 100)));
+  const low = adiNum < THRESHOLD;
+  const color = low ? '#c62828' : '#2e7d32';
+  const track = '#eceff1';
+  return `
+    <table cellpadding="0" cellspacing="0" width="100%" style="margin-top:6px;">
+      <tr>
+        <td style="background:${track};border-radius:6px;padding:0;">
+          <table cellpadding="0" cellspacing="0" width="${pct}%" style="min-width:8px;">
+            <tr><td style="background:${color};height:10px;border-radius:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
+
+async function sendAlert(transporter, { allRows, lowRows }) {
   const fromName =
     process.env.BALANCE_ALERT_FROM_NAME ||
-    process.env.MAIL_DEFAULT_NAME ||
-    'E-CLAIM Alerts';
+    'ADI L2 Operator Alerts';
   const fromEmail = process.env.MAIL_DEFAULT_EMAIL || process.env.MAIL_USER;
-  const lines = rows
-    .map(
-      (r) =>
-        `- ${r.label}: ${r.address}\n  Balance: ${r.adi} ADI (threshold: ${THRESHOLD} ADI)`,
-    )
+  const checkedAt = new Date().toISOString();
+  const maxForScale = Math.max(
+    THRESHOLD * 2,
+    ...allRows.map((r) => Number(r.adi) || 0),
+    1,
+  );
+
+  const lowNames = lowRows.map((r) => r.label).join(', ');
+  const subject = `[ADI L2] Low operator balance — ${lowNames} below ${THRESHOLD} ADI`;
+
+  const textLines = allRows
+    .map((r) => {
+      const low = Number(r.adi) < THRESHOLD;
+      return `${r.label.padEnd(8)}  ${r.adi} ADI  ${low ? 'LOW' : 'OK'}  ${r.address}\n  ${explorerUrl(r.address)}`;
+    })
     .join('\n\n');
 
-  const subject = `[E-CLAIM] Low ADI balance — ${rows.length} wallet${rows.length > 1 ? 's' : ''} below ${THRESHOLD} ADI`;
-  const text = `E-CLAIM wallet balance alert
+  const text = `ADI L2 operator balance alert
 
-One or more watched wallets are below the configured ADI threshold.
+One or more L2 operator wallets (commit / prove / execute) are below ${THRESHOLD} ADI.
 
-Network: ADI Foundation (chain ${CHAIN_ID})
+Network: ADI Mainnet (chain ${CHAIN_ID})
 RPC: ${RPC}
 Threshold: ${THRESHOLD} ADI
-Checked at: ${new Date().toISOString()}
+Checked at: ${checkedAt}
 
-${lines}
+${textLines}
 
-Action required: top up these wallets so claim submit and registry transactions can continue.
+Please top up the LOW operator wallet(s) so L2 operations can continue.
 `;
+
+  const cards = allRows
+    .map((r) => {
+      const adiNum = Number(r.adi);
+      const low = adiNum < THRESHOLD;
+      const statusColor = low ? '#c62828' : '#2e7d32';
+      const statusBg = low ? '#ffebee' : '#e8f5e9';
+      const status = low ? 'LOW' : 'OK';
+      const title =
+        r.label.charAt(0).toUpperCase() + r.label.slice(1).toLowerCase();
+      return `
+      <tr>
+        <td style="padding:0 0 14px 0;">
+          <table cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff;border:1px solid #e0e0e0;border-radius:10px;">
+            <tr>
+              <td style="padding:14px 16px;">
+                <table cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="font-size:15px;font-weight:700;color:#111;">${title} operator</td>
+                    <td align="right">
+                      <span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.04em;color:${statusColor};background:${statusBg};">${status}</span>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin-top:8px;font-size:26px;font-weight:700;color:${statusColor};letter-spacing:-0.02em;">
+                  ${r.adi} <span style="font-size:13px;font-weight:600;color:#757575;">ADI</span>
+                </div>
+                ${balanceBar(adiNum, maxForScale)}
+                <div style="margin-top:8px;font-size:11px;color:#9e9e9e;">
+                  Threshold ${THRESHOLD} ADI
+                  &nbsp;·&nbsp;
+                  <a href="${explorerUrl(r.address)}" style="color:#546e7a;text-decoration:none;">${shortAddr(r.address)}</a>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`;
+    })
+    .join('');
 
   const html = `
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8" /></head>
-<body style="font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; line-height: 1.5; max-width: 640px;">
-  <h2 style="margin: 0 0 12px; font-size: 18px;">E-CLAIM wallet balance alert</h2>
-  <p style="margin: 0 0 16px;">One or more watched wallets are below the configured ADI threshold.</p>
-  <table cellpadding="0" cellspacing="0" style="margin: 0 0 16px; font-size: 14px;">
-    <tr><td style="padding: 2px 12px 2px 0; color: #555;">Network</td><td>ADI Foundation (chain ${CHAIN_ID})</td></tr>
-    <tr><td style="padding: 2px 12px 2px 0; color: #555;">RPC</td><td><code>${RPC}</code></td></tr>
-    <tr><td style="padding: 2px 12px 2px 0; color: #555;">Threshold</td><td>${THRESHOLD} ADI</td></tr>
-    <tr><td style="padding: 2px 12px 2px 0; color: #555;">Checked at</td><td>${new Date().toISOString()}</td></tr>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table cellpadding="0" cellspacing="0" width="100%" style="background:#f4f6f8;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table cellpadding="0" cellspacing="0" width="100%" style="max-width:480px;">
+          <tr>
+            <td style="padding:0 4px 18px 4px;">
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#90a4ae;">ADI Mainnet · L2 operators</div>
+              <div style="margin-top:6px;font-size:22px;font-weight:700;color:#111;letter-spacing:-0.02em;">Balance alert</div>
+              <div style="margin-top:6px;font-size:14px;color:#607d8b;line-height:1.45;">
+                ${lowRows.length} operator${lowRows.length > 1 ? 's' : ''} below <b>${THRESHOLD} ADI</b>
+                (${lowNames}).
+              </div>
+            </td>
+          </tr>
+          ${cards}
+          <tr>
+            <td style="padding:6px 4px 0 4px;font-size:12px;color:#90a4ae;line-height:1.5;">
+              Checked ${checkedAt}<br/>
+              RPC ${RPC} · chain ${CHAIN_ID}<br/>
+              Please top up LOW operator wallets so L2 commit / prove / execute can continue.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
-  <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; border-color: #ccc; width: 100%; font-size: 14px;">
-    <thead>
-      <tr style="background: #f5f5f5;">
-        <th align="left">Label</th>
-        <th align="left">Address</th>
-        <th align="right">Balance (ADI)</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows
-        .map(
-          (r) =>
-            `<tr>
-              <td>${r.label}</td>
-              <td><code style="font-size: 12px;">${r.address}</code></td>
-              <td align="right" style="color: #b00020; font-weight: bold;">${r.adi}</td>
-            </tr>`,
-        )
-        .join('')}
-    </tbody>
-  </table>
-  <p style="margin: 16px 0 0;">Action required: top up these wallets so claim submit and registry transactions can continue.</p>
 </body>
-</html>
-`;
+</html>`;
 
   if (DRY_RUN) {
     console.log(`[dry-run] would email → ${ALERT_TO.join(', ')}`);
@@ -238,7 +307,7 @@ Action required: top up these wallets so claim submit and registry transactions 
 }
 
 async function main() {
-  console.log('── Wallet balance alert check ──');
+  console.log('── ADI L2 operator balance check ──');
   console.log(`RPC:        ${RPC}`);
   console.log(`Threshold:  ${THRESHOLD} ADI`);
   console.log(`Cooldown:         ${ALERT_TO.join(', ') || '(none)'}`);
@@ -258,17 +327,20 @@ async function main() {
 
   const provider = new ethers.JsonRpcProvider(RPC, CHAIN_ID, { staticNetwork: true });
   const state = loadState();
+  const allRows = [];
   const low = [];
 
   for (const w of wallets) {
     const bal = await provider.getBalance(w.address);
     const adi = Number(ethers.formatEther(bal));
     const status = adi < THRESHOLD ? 'LOW' : 'ok';
+    const row = { ...w, adi: adi.toFixed(6) };
+    allRows.push(row);
     console.log(`  ${w.address}  ${adi.toFixed(6)} ADI  [${w.label}]  ${status}`);
     appendLog(`${w.address} balance=${adi.toFixed(6)} label=${w.label} status=${status}`);
 
     if (adi < THRESHOLD) {
-      low.push({ ...w, adi: adi.toFixed(6) });
+      low.push(row);
     }
   }
 
@@ -293,7 +365,7 @@ async function main() {
     console.log('SMTP OK');
   }
 
-  const info = await sendAlert(transporter, toAlert);
+  const info = await sendAlert(transporter, { allRows, lowRows: toAlert });
   console.log(`Alert sent → ${ALERT_TO.join(', ')}  messageId=${info.messageId || 'n/a'}`);
   appendLog(`result=alerted n=${toAlert.length} to=${ALERT_TO.join(',')}`);
 
