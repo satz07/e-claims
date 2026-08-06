@@ -20,6 +20,7 @@ import { VerifiableRegistryService } from './verifiable-registry.service';
 import { getActiveChain } from './chain-config';
 import { logChainTransaction } from './tx-audit-log';
 import { extendChainWriteLock, withChainWriteLock } from './chain-write-lock';
+import { RegistryEnsureService } from './registry-ensure.service';
 
 const META_FILE = path.join(process.cwd(), 'claim-meta.json');
 
@@ -143,6 +144,7 @@ export class EclaimContractService {
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
     private readonly verifiableRegistries: VerifiableRegistryService,
+    private readonly registryEnsure: RegistryEnsureService,
   ) {
     this.provider = new ethers.JsonRpcProvider(RPC_URL);
     this.contract = new ethers.Contract(CONTRACT_ADDRESS, ABI.abi, this.provider);
@@ -521,7 +523,7 @@ export class EclaimContractService {
       if (!providerOk) {
         throw new BadRequestException(
           `Facility "${parsed.fid}" is not registered or not authorized in ProviderRegistry. ` +
-            `Register at /provider-registry or POST /api/public/integration/seed-demo-registries.`,
+            `POST /api/public/integration/ensure-registries or register at /provider-registry.`,
         );
       }
     }
@@ -535,7 +537,7 @@ export class EclaimContractService {
       if (!ok) {
         throw new BadRequestException(
           `Citizen CR "${parsed.crId}" is not registered or not authorized. ` +
-            `Register at /citizen-registry or seed demo registries.`,
+            `POST /api/public/integration/ensure-registries or register at /citizen-registry.`,
         );
       }
     }
@@ -549,9 +551,28 @@ export class EclaimContractService {
       if (!ok) {
         throw new BadRequestException(
           `Scheme "${parsed.schemeCode}" is not registered or not authorized. ` +
-            `Register at /insurer-registry or seed demo registries.`,
+            `POST /api/public/integration/ensure-registries or register at /insurer-registry.`,
         );
       }
+    }
+  }
+
+  /** Pull registry rows from CLAIM_DB when missing on-chain (REGISTRY_AUTO_ENSURE !== false). */
+  private async autoEnsureRegistries(
+    parsed: ReturnType<typeof parseFhirBundle>,
+    raw?: unknown,
+  ) {
+    if (process.env.REGISTRY_AUTO_ENSURE === 'false') return;
+    const result = await this.registryEnsure.ensureFromParsed(parsed, raw);
+    if (!result.ok) {
+      const parts = [
+        result.provider.error && `provider: ${result.provider.error}`,
+        result.citizen.error && `citizen: ${result.citizen.error}`,
+        result.scheme.error && `scheme: ${result.scheme.error}`,
+      ].filter(Boolean);
+      throw new BadRequestException(
+        `Registry ensure failed — POST /api/public/integration/ensure-registries. ${parts.join('; ')}`,
+      );
     }
   }
 
@@ -562,6 +583,7 @@ export class EclaimContractService {
     if (isDuplicate) {
       throw new BadRequestException(`Record already anchored for id "${parsed.claimId}"`);
     }
+    await this.autoEnsureRegistries(parsed, raw);
     await this.assertRegistriesAuthorize(parsed);
     const claimNumber = await this.nextClaimNumber();
     const claimStruct = buildClaimStruct(parsed, claimNumber);
@@ -623,6 +645,8 @@ export class EclaimContractService {
     if (isDuplicate) {
       throw new BadRequestException(`Record already anchored for id "${parsed.claimId}"`);
     }
+
+    await this.autoEnsureRegistries(parsed, raw);
 
     await this.assertRegistriesAuthorize(parsed);
 
@@ -723,13 +747,15 @@ export class EclaimContractService {
       }
     });
 
-    for (const parsed of parsedList) {
+    for (let i = 0; i < parsedList.length; i++) {
+      const parsed = parsedList[i];
       const isDuplicate = await this.checkDuplicate(parsed.claimId, parsed.recordUse);
       if (isDuplicate) {
         throw new BadRequestException(
           `Record already anchored for id "${parsed.claimId}"`,
         );
       }
+      await this.autoEnsureRegistries(parsed, bundles[i]);
       await this.assertRegistriesAuthorize(parsed);
     }
 

@@ -12,6 +12,9 @@ import {
 } from './registry-controllers';
 import { IntegrationService } from './integration.service';
 import { IntegrationController } from './integration.controller';
+import { ClaimDbService } from './claim-db.service';
+import { RegistryEnsureService } from './registry-ensure.service';
+import { EclaimApiKeyGuard } from './eclaim-api-key.guard';
 
 @Module({
   imports: [ConfigModule],
@@ -19,7 +22,10 @@ import { IntegrationController } from './integration.controller';
     EclaimContractService,
     ProviderRegistryService,
     VerifiableRegistryService,
+    ClaimDbService,
+    RegistryEnsureService,
     IntegrationService,
+    EclaimApiKeyGuard,
   ],
   controllers: [
     ProviderRegistryController,
@@ -33,6 +39,8 @@ import { IntegrationController } from './integration.controller';
     EclaimContractService,
     ProviderRegistryService,
     VerifiableRegistryService,
+    ClaimDbService,
+    RegistryEnsureService,
     IntegrationService,
   ],
 })

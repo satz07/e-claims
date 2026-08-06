@@ -106,6 +106,17 @@ function loadEnvFile(filePath) {
 loadEnvFile(path.join(root, '.env'));
 
 const BACKEND = (process.env.BACKEND_URL || 'http://localhost:8001').replace(/\/$/, '');
+const API_KEY = process.env.ECLAIM_API_KEY || '';
+
+function apiHeaders(extra = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    accept: 'application/json',
+    ...extra,
+  };
+  if (API_KEY) headers['X-API-Key'] = API_KEY;
+  return headers;
+}
 const RPC =
   process.env.APEIRO_RPC_URL ||
   process.env.CHAIN_RPC_URL ||
@@ -459,7 +470,7 @@ async function api(method, urlPath, body, retries = 3) {
     try {
       const res = await fetch(`${BACKEND}${urlPath}`, {
         method,
-        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        headers: apiHeaders(),
         body: body ? JSON.stringify(body) : undefined,
       });
       const text = await res.text();

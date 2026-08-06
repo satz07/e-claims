@@ -5,11 +5,16 @@ import {
   Body,
   Param,
   Query,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ProviderRegistryService } from './provider-registry.service';
+import { EclaimApiKeyGuard } from './eclaim-api-key.guard';
 
 @ApiTags('[E-CLAIM-Only] provider-registry')
+@ApiSecurity('eclaim-api-key')
+@ApiHeader({ name: 'X-API-Key', required: true, description: 'E-claim integration API key' })
+@UseGuards(EclaimApiKeyGuard)
 @Controller('public/provider-registry')
 export class ProviderRegistryController {
   constructor(private readonly service: ProviderRegistryService) {}

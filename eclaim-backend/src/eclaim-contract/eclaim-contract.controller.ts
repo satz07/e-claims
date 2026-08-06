@@ -1,8 +1,12 @@
-import { Controller, Post, Get, Body, Param, Query, HttpCode, BadRequestException } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Controller, Post, Get, Body, Param, Query, HttpCode, BadRequestException, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiSecurity, ApiHeader } from '@nestjs/swagger';
 import { EclaimContractService } from './eclaim-contract.service';
+import { EclaimApiKeyGuard } from './eclaim-api-key.guard';
 
 @ApiTags('[E-CLAIM-Only]  eclaim-contract')
+@ApiSecurity('eclaim-api-key')
+@ApiHeader({ name: 'X-API-Key', required: true, description: 'E-claim integration API key' })
+@UseGuards(EclaimApiKeyGuard)
 @Controller('public/eclaim-contract')
 export class EclaimContractController {
   constructor(private readonly service: EclaimContractService) {}

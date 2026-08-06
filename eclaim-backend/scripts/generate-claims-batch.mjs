@@ -40,6 +40,17 @@ function loadEnv(filePath) {
 loadEnv(path.join(root, '.env'));
 
 const BACKEND = (process.env.BACKEND_URL || 'http://localhost:8001').replace(/\/$/, '');
+const API_KEY = process.env.ECLAIM_API_KEY || '';
+
+function apiHeaders(extra = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    accept: 'application/json',
+    ...extra,
+  };
+  if (API_KEY) headers['X-API-Key'] = API_KEY;
+  return headers;
+}
 const EXPLORER = (
   process.env.CHAIN_EXPLORER_URL || 'https://explorer.apeiro.adifoundation.ai'
 ).replace(/\/$/, '');
@@ -206,7 +217,7 @@ async function api(method, urlPath, body, retries = 4) {
     try {
       const res = await fetch(`${BACKEND}${urlPath}`, {
         method,
-        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        headers: apiHeaders(),
         body: body ? JSON.stringify(body) : undefined,
       });
       const text = await res.text();

@@ -6,12 +6,17 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { VerifiableRegistryService } from './verifiable-registry.service';
+import { EclaimApiKeyGuard } from './eclaim-api-key.guard';
 
 function registryController(kind: 'citizen' | 'clinician' | 'insurer', tag: string) {
   @ApiTags(tag)
+  @ApiSecurity('eclaim-api-key')
+  @ApiHeader({ name: 'X-API-Key', required: true, description: 'E-claim integration API key' })
+  @UseGuards(EclaimApiKeyGuard)
   @Controller(`public/${kind}-registry`)
   @Injectable()
   class RegistryController {

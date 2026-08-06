@@ -37,6 +37,15 @@ async function bootstrap() {
       },
       'access-token', // name of security
     )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+        description: 'E-claim integration API key (share with partners)',
+      },
+      'eclaim-api-key',
+    )
     .build();
   app.use('/uploads', express.static(join(__dirname, '..', 'uploads'))); // Serve images
   app.setGlobalPrefix('api');
