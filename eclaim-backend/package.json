@@ -26,7 +26,8 @@
     "migration:revert": "npm run typeorm -- migration:revert",
     "seed:claims": "node scripts/generate-claims.mjs",
     "seed:from-db": "node scripts/seed-from-db.mjs",
-    "check:balances": "node scripts/check-wallet-balances.mjs"
+    "check:balances": "node scripts/check-wallet-balances.mjs",
+    "check:seed-workers": "node scripts/check-seed-workers.mjs"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.29.1",

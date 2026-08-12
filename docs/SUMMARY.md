@@ -8,6 +8,10 @@
 * [Issue a claim](user-guide-issue-claim.md)
 * [Search & list claims](user-guide-search.md)
 
+## For integrators
+
+* [E-claims API integration guide](eclaims-api-integration-guide.md)
+
 ## Platform
 
 * [Network & contract reference](network-and-contract-reference.md)

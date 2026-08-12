@@ -10,6 +10,7 @@ import { CONTRACT_ADDRESS, CONTRACT_OWNER_ADDRESS, UPSERT_CLAIM_ABI } from "@/li
 import { ACTIVE_NETWORK, explorerTxUrl } from "@/lib/network"
 import { claimStructTuple, type PreparedClaimStruct } from "@/lib/claim-struct"
 import { writeContractAndWait } from "@/lib/write-contract"
+import { eclaimApiHeaders } from "@/lib/eclaim-api"
 
 type RecordUse = "claim" | "preauthorization"
 type SampleKind = "minimal" | "full"
@@ -116,7 +117,7 @@ export default function SubmitFhirPage() {
 
       const prepRes = await fetch(`${base}/api/public/eclaim-contract/prepare-submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", accept: "application/json" },
+        headers: eclaimApiHeaders(),
         body: JSON.stringify(body),
       })
       const prepared = await prepRes.json()
@@ -141,7 +142,7 @@ export default function SubmitFhirPage() {
 
       const metaRes = await fetch(`${base}/api/public/eclaim-contract/meta`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", accept: "application/json" },
+        headers: eclaimApiHeaders(),
         body: JSON.stringify({
           claimNumber: Number(claimStruct.claimNumber),
           source: "fhir",
@@ -181,7 +182,7 @@ export default function SubmitFhirPage() {
       const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"
       const res = await fetch(`${base}/api/public/eclaim-contract/submit?wait=false`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", accept: "application/json" },
+        headers: eclaimApiHeaders(),
         body: JSON.stringify(body),
       })
       const data = await res.json()

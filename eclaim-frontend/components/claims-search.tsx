@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { SearchForm } from "./search-form"
 import { ResultsTable } from "./results-table"
+import { eclaimApiHeaders } from "@/lib/eclaim-api"
 
 export function ClaimsSearch() {
   const [searchResults, setSearchResults] = useState<any[]>([])
@@ -26,7 +27,7 @@ export function ClaimsSearch() {
       url.searchParams.set("size", size.toString())
 
       const res = await fetch(url.toString(), {
-        headers: { accept: "application/json" },
+        headers: eclaimApiHeaders({ accept: "application/json" }),
       })
       if (!res.ok) throw new Error("Failed to fetch claims")
 
@@ -49,7 +50,7 @@ export function ClaimsSearch() {
       setSearchMode("claimId")
       const res = await fetch(`${base()}/api/public/eclaim-contract/search`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", accept: "application/json" },
+        headers: eclaimApiHeaders(),
         body: JSON.stringify({ claimId }),
       })
       if (!res.ok) {

@@ -15,6 +15,7 @@ import {
 } from "@/lib/provider-contracts"
 import { writeContractAndWait } from "@/lib/write-contract"
 import { explorerTxUrl } from "@/lib/network"
+import { eclaimApiHeaders } from "@/lib/eclaim-api"
 
 type Tab = "register" | "lookup" | "list"
 export type RegistryKind = "citizen" | "clinician" | "insurer" | "provider"
@@ -131,7 +132,9 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${api}?page=${page}&size=${LIST_SIZE}`)
+      const res = await fetch(`${api}?page=${page}&size=${LIST_SIZE}`, {
+        headers: eclaimApiHeaders(),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.message || "List failed")
       if (config.kind === "provider") {
@@ -208,7 +211,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
       try {
         await fetch(`${api}/remember`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: eclaimApiHeaders(),
           body: JSON.stringify(
             config.kind === "provider" ? { providerId: id } : { id },
           ),
@@ -242,7 +245,7 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
 
       const res = await fetch(`${api}/search`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: eclaimApiHeaders(),
         body: JSON.stringify(searchBody),
       })
       const data = await res.json()
