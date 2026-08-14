@@ -1,25 +1,29 @@
 /**
  * Alert if DB seed worker(s) are not running (or progress is stale).
- * Optionally auto-restart a configured worker (no manual SSH needed).
+ * Optionally auto-restart backend (pm2) + seed worker when stuck.
  *
  * Usage:
  *   node scripts/check-seed-workers.mjs
  *   node scripts/check-seed-workers.mjs --dry-run
  *   node scripts/check-seed-workers.mjs --force          # ignore email cooldown
  *   node scripts/check-seed-workers.mjs --no-restart     # alert only
- *   node scripts/check-seed-workers.mjs --restart        # force restart attempt
+ *   node scripts/check-seed-workers.mjs --restart        # force recovery attempt
  *
  * Env (.env):
  *   MAIL_*
  *   SEED_ALERT_TO=ops@example.com
  *   SEED_ALERT_COOLDOWN_MINUTES=360
- *   SEED_ALERT_STALE_MINUTES=45
+ *   SEED_ALERT_STALE_MINUTES=45          # no new OK claims / fetch-fail storm
+ *   SEED_RECOVERY_COOLDOWN_MINUTES=30     # min gap between auto backend+seed restarts
  *   SEED_ALERT_FROM_NAME=E-Claims Platform Alerts
  *   SEED_ALERT_AUTO_RESTART=true
- *   SEED_RESTART_WORKER=B
- *   SEED_RESTART_FROM=340778          (optional — falls back to progress.range)
- *   SEED_RESTART_TO=358836
+ *   SEED_ALERT_RESTART_BACKEND=true
+ *   SEED_RESTART_PM2_NAME=eclaim-backend_v2
+ *   SEED_RESTART_WORKER=D
+ *   SEED_RESTART_FROM=376896
+ *   SEED_RESTART_TO=394954
  *   SEED_RESTART_LIMIT=10000
+ *   SEED_RESTART_SKIP_ENSURE=true        # pass --skip-ensure-registries on restart
  *   SEED_RESTART_HEALTH_URL=http://localhost:8001/api/health
  */
 import fs from 'fs';
@@ -55,12 +59,22 @@ function loadEnv(filePath) {
 loadEnv(path.join(root, '.env'));
 
 const COOLDOWN_MIN = Number(process.env.SEED_ALERT_COOLDOWN_MINUTES || 360);
-const STALE_MIN = Number(process.env.SEED_ALERT_STALE_MINUTES || 0);
+const RECOVERY_COOLDOWN_MIN = Number(
+  process.env.SEED_RECOVERY_COOLDOWN_MINUTES || 30,
+);
+const STALE_MIN = Number(process.env.SEED_ALERT_STALE_MINUTES || 45);
 const AUTO_RESTART =
   String(process.env.SEED_ALERT_AUTO_RESTART || 'false').toLowerCase() ===
   'true';
+const RESTART_BACKEND =
+  String(process.env.SEED_ALERT_RESTART_BACKEND || 'true').toLowerCase() ===
+  'true';
+const PM2_NAME = process.env.SEED_RESTART_PM2_NAME || 'eclaim-backend_v2';
 const RESTART_WORKER = String(process.env.SEED_RESTART_WORKER || 'B').trim();
 const RESTART_LIMIT = Number(process.env.SEED_RESTART_LIMIT || 10000);
+const SKIP_ENSURE =
+  String(process.env.SEED_RESTART_SKIP_ENSURE || 'true').toLowerCase() ===
+  'true';
 const HEALTH_URL =
   process.env.SEED_RESTART_HEALTH_URL || 'http://localhost:8001/api/health';
 
@@ -80,17 +94,25 @@ const FORCE = args.has('--force');
 const NO_RESTART = args.has('--no-restart');
 const FORCE_RESTART = args.has('--restart');
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function appendLog(line) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.appendFileSync(RUN_LOG, `${new Date().toISOString()} ${line}\n`);
 }
 
+function defaultState() {
+  return { lastAlertAt: null, lastRecoveryAt: null, lastSnapshot: null };
+}
+
 function loadState() {
-  if (!fs.existsSync(STATE_FILE)) return { lastAlertAt: null };
+  if (!fs.existsSync(STATE_FILE)) return defaultState();
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    return { ...defaultState(), ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) };
   } catch {
-    return { lastAlertAt: null };
+    return defaultState();
   }
 }
 
@@ -106,6 +128,13 @@ function shouldAlert(state) {
   if (!state.lastAlertAt) return true;
   const ageMs = Date.now() - new Date(state.lastAlertAt).getTime();
   return ageMs >= COOLDOWN_MIN * 60_000;
+}
+
+function shouldRecover(state) {
+  if (FORCE_RESTART) return true;
+  if (!state.lastRecoveryAt) return true;
+  const ageMs = Date.now() - new Date(state.lastRecoveryAt).getTime();
+  return ageMs >= RECOVERY_COOLDOWN_MIN * 60_000;
 }
 
 function listSeedProcesses() {
@@ -151,6 +180,40 @@ function readProgress(worker) {
   }
 }
 
+function readRunLogTail(worker, maxLines = 60) {
+  const file = path.join(LOG_DIR, `db-seed-runs-${worker}.log`);
+  if (!fs.existsSync(file)) return [];
+  try {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    return lines.slice(-maxLines);
+  } catch {
+    return [];
+  }
+}
+
+function analyzeRunLog(worker) {
+  const tail = readRunLogTail(worker, 80);
+  const text = tail.join('\n');
+  const fetchFailRetries =
+    (text.match(/retry \d+\/\d+: fetch failed/gi) || []).length;
+  const okTxRecent = (tail.slice(-25).join('\n').match(/OK tx=/gi) || []).length;
+  const errRecent = (tail.slice(-25).join('\n').match(/\bERR\b/gi) || []).length;
+  const ensuringStuck =
+    /Ensuring registries for run:/i.test(text) &&
+    !/RUN START/i.test(text.slice(text.lastIndexOf('Ensuring registries')));
+  const lastLine = tail.filter(Boolean).at(-1) || '';
+
+  return {
+    fetchFailRetries,
+    okTxRecent,
+    errRecent,
+    ensuringStuck,
+    lastLine: lastLine.slice(0, 120),
+    apiStuck:
+      fetchFailRetries >= 3 && okTxRecent === 0 && errRecent > 0,
+  };
+}
+
 function resolveRestartRange() {
   const progress = readProgress(RESTART_WORKER);
   const from = Number(
@@ -161,6 +224,13 @@ function resolveRestartRange() {
     return null;
   }
   return { from, to, progress };
+}
+
+function isRangeComplete(progress, to) {
+  return (
+    progress?.lastClaimNumber != null &&
+    Number(progress.lastClaimNumber) >= Number(to)
+  );
 }
 
 function createMailer() {
@@ -180,13 +250,19 @@ function createMailer() {
   });
 }
 
-function buildIssues(processes) {
+function buildIssues(processes, state) {
   const issues = [];
+  const progress = readProgress(RESTART_WORKER);
+  const range = progress?.range;
+  const complete =
+    range?.to != null &&
+    progress?.lastClaimNumber != null &&
+    Number(progress.lastClaimNumber) >= Number(range.to);
 
   if (processes.length === 0) {
     issues.push({
       kind: 'no_process',
-      worker: null,
+      worker: RESTART_WORKER,
       message: 'Claims database import is not running',
       detail:
         'The service that imports claims from the database and anchors them on the blockchain is stopped. No new claims are being processed.',
@@ -194,35 +270,84 @@ function buildIssues(processes) {
     return issues;
   }
 
-  if (STALE_MIN > 0) {
-    const runningWorkers = [
-      ...new Set(processes.map((p) => p.worker).filter(Boolean)),
-    ];
+  if (complete) return issues;
 
-    for (const w of runningWorkers) {
-      const progress = readProgress(w);
-      if (!progress?.lastImportedAt) continue;
+  const workerProc = processes.find((p) => p.worker === RESTART_WORKER);
+  const logInfo = analyzeRunLog(RESTART_WORKER);
+  const claimsOk = Number(progress?.totals?.claimsOk ?? 0);
+  const snap = state.lastSnapshot;
+
+  let noOnChainMin = 0;
+  if (
+    snap?.worker === RESTART_WORKER &&
+    snap.claimsOk === claimsOk &&
+    snap.at
+  ) {
+    noOnChainMin = (Date.now() - new Date(snap.at).getTime()) / 60_000;
+  }
+
+  if (STALE_MIN > 0 && progress) {
+    if (noOnChainMin >= STALE_MIN) {
+      issues.push({
+        kind: 'no_onchain_progress',
+        worker: RESTART_WORKER,
+        message: 'No new claims anchored on-chain',
+        detail: `Successful on-chain imports have not increased for approximately ${Math.round(noOnChainMin)} minutes (still at ${claimsOk} OK claims). The import may be failing silently or the API is unreachable.`,
+        lastImportedAt: progress.lastImportedAt,
+        lastClaimNumber: progress.lastClaimNumber,
+        claimsOk,
+        range,
+      });
+    } else if (progress.lastImportedAt) {
       const ageMin =
         (Date.now() - new Date(progress.lastImportedAt).getTime()) / 60_000;
-      const range = progress.range;
-      const complete =
-        range?.to != null &&
-        Number(progress.lastClaimNumber) >= Number(range.to);
-      if (!complete && ageMin >= STALE_MIN) {
+      if (ageMin >= STALE_MIN && !complete) {
         issues.push({
           kind: 'stale_progress',
-          worker: w,
+          worker: RESTART_WORKER,
           message: 'Claims database import has stalled',
-          detail: `No new claims have been imported for approximately ${Math.round(ageMin)} minutes. The import process may be hung or blocked.`,
+          detail: `No import activity for approximately ${Math.round(ageMin)} minutes. The process may be hung waiting on the API or blockchain.`,
           lastImportedAt: progress.lastImportedAt,
           lastClaimNumber: progress.lastClaimNumber,
+          claimsOk,
           range,
         });
       }
     }
   }
 
-  return issues;
+  if (workerProc && logInfo.apiStuck) {
+    issues.push({
+      kind: 'api_stuck',
+      worker: RESTART_WORKER,
+      message: 'Import API unreachable (fetch failed)',
+      detail: `The import log shows repeated "fetch failed" retries with no recent successful transactions. Last log: ${logInfo.lastLine}`,
+      lastClaimNumber: progress?.lastClaimNumber,
+      claimsOk,
+      range,
+    });
+  }
+
+  if (workerProc && logInfo.ensuringStuck && !issues.length) {
+    issues.push({
+      kind: 'registry_stuck',
+      worker: RESTART_WORKER,
+      message: 'Import stuck during registry setup',
+      detail:
+        'The process has been ensuring provider/scheme registries for an extended period without starting claim submissions. The backend may be hung on blockchain RPC calls.',
+      lastClaimNumber: progress?.lastClaimNumber,
+      claimsOk,
+      range,
+    });
+  }
+
+  // de-dupe by kind
+  const seen = new Set();
+  return issues.filter((i) => {
+    if (seen.has(i.kind)) return false;
+    seen.add(i.kind);
+    return true;
+  });
 }
 
 function formatWhen(iso) {
@@ -251,19 +376,56 @@ async function checkBackendHealth() {
   }
 }
 
-function killStaleSeedProcesses(processes, issues) {
-  const staleWorkers = new Set(
-    issues.filter((i) => i.kind === 'stale_progress').map((i) => i.worker),
-  );
-  if (!staleWorkers.size && !issues.some((i) => i.kind === 'no_process')) {
-    return [];
+async function tryRestartBackend() {
+  if (!RESTART_BACKEND) {
+    return { ok: true, skipped: true, reason: 'Backend restart disabled' };
   }
+
+  try {
+    execSync(`pm2 restart ${PM2_NAME}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 90_000,
+    });
+    appendLog(`backend pm2 restart ${PM2_NAME}`);
+    await sleep(10_000);
+
+    for (let i = 0; i < 6; i++) {
+      const health = await checkBackendHealth();
+      if (health.ok) {
+        return {
+          ok: true,
+          reason: `Backend restarted (${PM2_NAME}) and health check passed.`,
+        };
+      }
+      await sleep(5000);
+    }
+
+    return {
+      ok: false,
+      reason: `Backend restarted (${PM2_NAME}) but health check still failing (${HEALTH_URL}).`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `Backend restart failed (${PM2_NAME}): ${err.message}`,
+    };
+  }
+}
+
+function killSeedProcesses(processes, issues) {
+  const killAll =
+    issues.some((i) => i.kind === 'no_process') ||
+    issues.some((i) =>
+      ['api_stuck', 'registry_stuck', 'stale_progress', 'no_onchain_progress'].includes(
+        i.kind,
+      ),
+    );
 
   const killed = [];
   for (const p of processes) {
     const shouldKill =
-      issues.some((i) => i.kind === 'no_process') ||
-      (p.worker && staleWorkers.has(p.worker)) ||
+      killAll ||
       (RESTART_WORKER && p.worker === RESTART_WORKER);
     if (!shouldKill || !p.pid || p.pid === '?') continue;
     try {
@@ -277,51 +439,75 @@ function killStaleSeedProcesses(processes, issues) {
   return killed;
 }
 
-/**
- * Start seed-from-db in background. Returns { ok, pid?, reason?, skipped? }.
- */
-async function tryRestartSeed(issues) {
+async function tryRecovery(issues) {
   const range = resolveRestartRange();
   if (!range) {
     return {
       ok: false,
+      backend: null,
+      seed: null,
       reason:
         'Restart range not configured (set SEED_RESTART_FROM / SEED_RESTART_TO or progress.range)',
     };
   }
 
   const { from, to, progress } = range;
-  if (
-    progress?.lastClaimNumber != null &&
-    Number(progress.lastClaimNumber) >= to
-  ) {
+  if (isRangeComplete(progress, to)) {
     return {
       ok: true,
       skipped: true,
+      backend: { skipped: true },
+      seed: { skipped: true },
       reason: `Worker ${RESTART_WORKER} range already complete (cursor #${progress.lastClaimNumber} ≥ ${to})`,
     };
   }
 
-  const health = await checkBackendHealth();
-  if (!health.ok) {
-    return {
-      ok: false,
-      reason: `Backend health check failed (${HEALTH_URL} → ${health.status || health.error || 'unreachable'}). Import was not restarted.`,
-    };
+  const needsBackend =
+    RESTART_BACKEND &&
+    issues.some((i) =>
+      ['api_stuck', 'registry_stuck', 'stale_progress', 'no_onchain_progress', 'no_process'].includes(
+        i.kind,
+      ),
+    );
+
+  let backend = { ok: true, skipped: !needsBackend, reason: 'not needed' };
+  if (needsBackend) {
+    backend = await tryRestartBackend();
+    if (!backend.ok && !backend.skipped) {
+      return {
+        ok: false,
+        backend,
+        seed: null,
+        reason: backend.reason,
+      };
+    }
+  } else {
+    const health = await checkBackendHealth();
+    if (!health.ok) {
+      backend = await tryRestartBackend();
+      if (!backend.ok) {
+        return {
+          ok: false,
+          backend,
+          seed: null,
+          reason: backend.reason,
+        };
+      }
+    }
   }
 
   const processes = listSeedProcesses();
-  killStaleSeedProcesses(processes, issues);
-  // brief pause so SIGTERM can take effect before spawn
-  await new Promise((r) => setTimeout(r, 1500));
+  killSeedProcesses(processes, issues);
+  await sleep(2000);
 
-  // if something still running for this worker after kill, don't double-start
   const still = listSeedProcesses().filter((p) => p.worker === RESTART_WORKER);
   if (still.length) {
     return {
       ok: true,
       skipped: true,
-      reason: `Worker ${RESTART_WORKER} already running (pid ${still.map((p) => p.pid).join(', ')})`,
+      backend,
+      seed: { skipped: true },
+      reason: `Worker ${RESTART_WORKER} still running after kill (pid ${still.map((p) => p.pid).join(', ')})`,
     };
   }
 
@@ -330,93 +516,118 @@ async function tryRestartSeed(issues) {
   const pidFile = path.join(LOG_DIR, `db-seed-worker-${RESTART_WORKER}.pid`);
   const outFd = fs.openSync(runLog, 'a');
 
-  const child = spawn(
-    process.execPath,
-    [
-      path.join(root, 'scripts', 'seed-from-db.mjs'),
-      '--worker',
-      RESTART_WORKER,
-      '--from',
-      String(from),
-      '--to',
-      String(to),
-      '--limit',
-      String(RESTART_LIMIT),
-      '--no-wait',
-    ],
-    {
-      cwd: root,
-      detached: true,
-      stdio: ['ignore', outFd, outFd],
-      env: process.env,
-    },
-  );
+  const seedArgs = [
+    path.join(root, 'scripts', 'seed-from-db.mjs'),
+    '--worker',
+    RESTART_WORKER,
+    '--from',
+    String(from),
+    '--to',
+    String(to),
+    '--limit',
+    String(RESTART_LIMIT),
+    '--no-wait',
+  ];
+  if (SKIP_ENSURE) seedArgs.push('--skip-ensure-registries');
+
+  const child = spawn(process.execPath, seedArgs, {
+    cwd: root,
+    detached: true,
+    stdio: ['ignore', outFd, outFd],
+    env: process.env,
+  });
   fs.closeSync(outFd);
   child.unref();
 
   fs.writeFileSync(pidFile, `${child.pid}\n`);
-  await new Promise((r) => setTimeout(r, 2000));
+  await sleep(3000);
 
   const alive = listSeedProcesses().some(
     (p) => String(p.pid) === String(child.pid) || p.worker === RESTART_WORKER,
   );
-  if (!alive) {
-    return {
-      ok: false,
-      pid: child.pid,
-      reason: `Restart launched (pid ${child.pid}) but process is not running — check logs/db-seed-runs-${RESTART_WORKER}.log`,
-    };
-  }
 
-  return {
-    ok: true,
-    pid: child.pid,
-    reason: `Import service restarted (worker ${RESTART_WORKER}, range ${from}→${to}, pid ${child.pid}).`,
-  };
+  const seed = alive
+    ? {
+        ok: true,
+        pid: child.pid,
+        reason: `Import restarted (worker ${RESTART_WORKER}, ${from}→${to}, pid ${child.pid}${SKIP_ENSURE ? ', skip registries' : ''}).`,
+      }
+    : {
+        ok: false,
+        pid: child.pid,
+        reason: `Import launch failed — check logs/db-seed-runs-${RESTART_WORKER}.log`,
+      };
+
+  const ok = seed.ok;
+  const reason = [
+    backend.reason && backend.reason !== 'not needed' ? backend.reason : null,
+    seed.reason,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return { ok, skipped: false, backend, seed, reason };
 }
 
-async function sendAlert(transporter, { issues, restart }) {
+async function sendAlert(transporter, { issues, recovery }) {
   const fromName =
     process.env.SEED_ALERT_FROM_NAME || 'E-Claims Platform Alerts';
   const fromEmail = process.env.MAIL_DEFAULT_EMAIL || process.env.MAIL_USER;
   const checkedAt = formatWhen(new Date().toISOString());
   const primary = issues[0];
 
-  const restartedOk = restart?.ok && !restart?.skipped;
-  const subject = restartedOk
-    ? '[E-Claims] Claims database import auto-restarted'
-    : primary.kind === 'no_process'
-      ? '[E-Claims] Claims database import is not running'
-      : primary.kind === 'stale_progress'
-        ? '[E-Claims] Claims database import has stalled'
-        : `[E-Claims] Claims import alert — action required`;
+  const recovered =
+    recovery?.ok && !recovery?.skipped && recovery?.seed?.ok;
+  const recoveryFailed = recovery && !recovery.ok && !recovery.skipped;
 
-  const statusLabel = restartedOk
-    ? 'RESTARTED'
-    : primary.kind === 'no_process'
-      ? 'STOPPED'
-      : 'STALLED';
-  const statusColor = restartedOk ? '#2e7d32' : '#c62828';
-  const statusBg = restartedOk ? '#e8f5e9' : '#ffebee';
+  const subject = recovered
+    ? '[E-Claims] Claims import auto-recovered (backend + import restarted)'
+    : recoveryFailed
+      ? '[E-Claims] Claims import stuck — auto-recovery failed'
+      : primary.kind === 'no_process'
+        ? '[E-Claims] Claims database import is not running'
+        : primary.kind === 'api_stuck'
+          ? '[E-Claims] Claims import API unreachable'
+          : '[E-Claims] Claims database import has stalled';
+
+  const statusLabel = recovered
+    ? 'RECOVERED'
+    : recoveryFailed
+      ? 'FAILED'
+      : primary.kind === 'no_process'
+        ? 'STOPPED'
+        : 'STALLED';
+  const statusColor =
+    statusLabel === 'RECOVERED'
+      ? '#2e7d32'
+      : statusLabel === 'FAILED'
+        ? '#c62828'
+        : '#c62828';
+  const statusBg =
+    statusLabel === 'RECOVERED'
+      ? '#e8f5e9'
+      : statusLabel === 'FAILED'
+        ? '#ffebee'
+        : '#ffebee';
 
   let actionText;
-  if (restartedOk) {
+  if (recovered) {
     actionText =
-      'The platform automatically restarted the claims database import service. No manual action is required unless further alerts arrive.';
-  } else if (restart?.skipped) {
-    actionText = restart.reason;
-  } else if (restart && !restart.ok) {
-    actionText = `Automatic restart was attempted but did not succeed: ${restart.reason} Please restart the import service on the E-Claims blockchain server.`;
-  } else if (primary.kind === 'no_process') {
+      'The platform automatically restarted the E-Claims backend and claims import service. Monitoring will continue — no manual action is required unless another alert arrives.';
+  } else if (recoveryFailed) {
+    actionText = `Automatic recovery was attempted but did not fully succeed: ${recovery.reason} Please investigate the E-Claims blockchain server manually.`;
+  } else if (recovery?.skipped) {
+    actionText = recovery.reason;
+  } else if (!recovery) {
     actionText =
-      'Please restart the claims database import service on the E-Claims blockchain server. Until it is restored, claims created in the source database will not be anchored on-chain.';
+      'Please investigate the import service on the E-Claims blockchain server. The backend and import process may need to be restarted.';
   } else {
     actionText =
-      'Please investigate the import service on the E-Claims blockchain server. The process may need to be restarted to resume anchoring claims on-chain.';
+      'Please restart the claims database import service on the E-Claims blockchain server.';
   }
 
-  const restartNote = restart?.reason
-    ? `\nAuto-recovery: ${restart.reason}\n`
+  const recoveryNote = recovery?.reason
+    ? `\nAuto-recovery: ${recovery.reason}\n`
     : '';
 
   const text = `E-Claims — Claims database import alert
@@ -425,7 +636,7 @@ Status: ${statusLabel}
 ${primary.message}
 
 ${primary.detail || ''}
-${restartNote}
+${recoveryNote}
 Checked: ${checkedAt}
 Platform: E-Claims blockchain integration (ADI L2)
 
@@ -456,7 +667,12 @@ If you need assistance, contact the platform operations team.
                 </div>
                 ${
                   i.lastImportedAt
-                    ? `<div style="margin-top:10px;font-size:12px;color:#90a4ae;">Last successful import: ${formatWhen(i.lastImportedAt)}</div>`
+                    ? `<div style="margin-top:10px;font-size:12px;color:#90a4ae;">Last activity: ${formatWhen(i.lastImportedAt)}</div>`
+                    : ''
+                }
+                ${
+                  i.claimsOk != null
+                    ? `<div style="margin-top:4px;font-size:12px;color:#90a4ae;">On-chain OK claims: ${i.claimsOk}</div>`
                     : ''
                 }
               </td>
@@ -467,9 +683,9 @@ If you need assistance, contact the platform operations team.
     )
     .join('');
 
-  const actionBg = restartedOk ? '#e8f5e9' : '#fff8e1';
-  const actionBorder = restartedOk ? '#a5d6a7' : '#ffe082';
-  const actionFg = restartedOk ? '#1b5e20' : '#5d4037';
+  const actionBg = recovered ? '#e8f5e9' : '#fff8e1';
+  const actionBorder = recovered ? '#a5d6a7' : '#ffe082';
+  const actionFg = recovered ? '#1b5e20' : '#5d4037';
 
   const html = `
 <!DOCTYPE html>
@@ -485,7 +701,7 @@ If you need assistance, contact the platform operations team.
               <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#90a4ae;">E-Claims · Blockchain integration</div>
               <div style="margin-top:6px;font-size:22px;font-weight:700;color:#111;letter-spacing:-0.02em;">Claims import alert</div>
               <div style="margin-top:6px;font-size:14px;color:#607d8b;line-height:1.45;">
-                ${primary.message}${restartedOk ? ' An automatic restart was performed.' : '.'}
+                ${primary.message}${recovered ? ' Backend and import were automatically restarted.' : '.'}
               </div>
             </td>
           </tr>
@@ -495,7 +711,7 @@ If you need assistance, contact the platform operations team.
               <table cellpadding="0" cellspacing="0" width="100%" style="background:${actionBg};border:1px solid ${actionBorder};border-radius:10px;">
                 <tr>
                   <td style="padding:14px 16px;font-size:13px;color:${actionFg};line-height:1.55;">
-                    <strong>${restartedOk ? 'Auto-recovery' : 'Action required'}</strong><br/>
+                    <strong>${recovered ? 'Auto-recovery' : 'Action required'}</strong><br/>
                     ${actionText}
                   </td>
                 </tr>
@@ -524,16 +740,38 @@ If you need assistance, contact the platform operations team.
   });
 }
 
+function updateSnapshot(state, progress) {
+  const claimsOk = Number(progress?.totals?.claimsOk ?? 0);
+  const snap = state.lastSnapshot;
+  if (
+    snap?.worker === RESTART_WORKER &&
+    snap.claimsOk === claimsOk
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    lastSnapshot: {
+      worker: RESTART_WORKER,
+      claimsOk,
+      claimNumber: progress?.lastClaimNumber ?? null,
+      at: new Date().toISOString(),
+    },
+  };
+}
+
 async function main() {
   const doRestart = (AUTO_RESTART || FORCE_RESTART) && !NO_RESTART;
+  let state = loadState();
 
   console.log('── DB seed worker check ──');
-  console.log(`Check:            any seed-from-db.mjs process`);
+  console.log(`Check:            worker ${RESTART_WORKER} + seed process`);
   console.log(`Alert to:         ${ALERT_TO.join(', ') || '(none)'}`);
-  console.log(`Cooldown:         ${COOLDOWN_MIN} min`);
+  console.log(`Email cooldown:   ${COOLDOWN_MIN} min`);
+  console.log(`Recovery cooldown:${RECOVERY_COOLDOWN_MIN} min`);
   console.log(`Stale threshold:  ${STALE_MIN > 0 ? `${STALE_MIN} min` : 'off'}`);
   console.log(
-    `Auto-restart:     ${doRestart ? `on (worker ${RESTART_WORKER})` : 'off'}`,
+    `Auto-recovery:    ${doRestart ? `on (pm2 ${PM2_NAME} + seed ${RESTART_WORKER})` : 'off'}`,
   );
   console.log(
     `Mode:             ${DRY_RUN ? 'dry-run' : FORCE ? 'force' : 'normal'}`,
@@ -556,10 +794,27 @@ async function main() {
     );
   }
 
-  const issues = buildIssues(processes);
+  const progress = readProgress(RESTART_WORKER);
+  if (progress) {
+    console.log(
+      `Progress ${RESTART_WORKER}: #${progress.lastClaimNumber} ok=${progress.totals?.claimsOk ?? '?'} err=${progress.totals?.errors ?? '?'}`,
+    );
+  }
+
+  const logInfo = analyzeRunLog(RESTART_WORKER);
+  if (logInfo.fetchFailRetries) {
+    console.log(
+      `Log: fetch-fail retries=${logInfo.fetchFailRetries} recent OK tx=${logInfo.okTxRecent}`,
+    );
+  }
+
+  const issues = buildIssues(processes, state);
+
   if (!issues.length) {
-    console.log('OK — seed worker(s) running.');
+    console.log('OK — import healthy.');
     appendLog('result=ok');
+    state = updateSnapshot(state, progress);
+    saveState(state);
     return;
   }
 
@@ -570,37 +825,48 @@ async function main() {
     );
   }
 
-  let restart = null;
-  if (doRestart) {
+  let recovery = null;
+  if (doRestart && shouldRecover(state)) {
     if (DRY_RUN) {
-      restart = {
+      recovery = {
         ok: true,
         skipped: true,
-        reason: 'Dry-run — restart not executed',
+        reason: 'Dry-run — would restart backend + seed',
       };
-      console.log(`[dry-run] would auto-restart worker ${RESTART_WORKER}`);
-    } else {
-      console.log(`Attempting auto-restart of worker ${RESTART_WORKER}…`);
-      restart = await tryRestartSeed(issues);
       console.log(
-        restart.ok
-          ? `Restart: ${restart.reason}`
-          : `Restart FAILED: ${restart.reason}`,
+        `[dry-run] would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
+      );
+    } else {
+      console.log('Attempting auto-recovery (backend + seed)…');
+      recovery = await tryRecovery(issues);
+      console.log(
+        recovery.ok ? `Recovery: ${recovery.reason}` : `Recovery FAILED: ${recovery.reason}`,
       );
       appendLog(
-        `restart ok=${restart.ok} skipped=${!!restart.skipped} pid=${restart.pid || '-'} ${restart.reason}`,
+        `recovery ok=${recovery.ok} skipped=${!!recovery.skipped} ${recovery.reason}`,
       );
+      if (!recovery.skipped) {
+        state.lastRecoveryAt = new Date().toISOString();
+      }
     }
+  } else if (doRestart) {
+    console.log(
+      `Recovery suppressed (cooldown ${RECOVERY_COOLDOWN_MIN} min). Use --restart to force.`,
+    );
+    appendLog(`result=recovery-cooldown issues=${issues.length}`);
   }
 
-  const state = loadState();
-  if (!shouldAlert(state)) {
+  const sendMail =
+    shouldAlert(state) ||
+    (recovery && !recovery.ok && !recovery.skipped) ||
+    (recovery?.ok && !recovery?.skipped);
+
+  if (!sendMail) {
     console.log(
-      `Alert suppressed (cooldown ${COOLDOWN_MIN} min). Use --force to re-send.`,
+      `Email suppressed (cooldown ${COOLDOWN_MIN} min). Use --force to re-send.`,
     );
-    appendLog(
-      `result=cooldown issues=${issues.length} restart=${restart ? restart.ok : 'n/a'}`,
-    );
+    state = updateSnapshot(state, progress);
+    saveState(state);
     return;
   }
 
@@ -608,21 +874,25 @@ async function main() {
   if (DRY_RUN) {
     console.log('Dry-run — email not sent.');
     appendLog(`result=dry-run issues=${issues.length}`);
+    state = updateSnapshot(state, progress);
+    saveState(state);
     return;
   }
 
   await transporter.verify();
   console.log('SMTP OK');
 
-  const info = await sendAlert(transporter, { issues, restart });
+  const info = await sendAlert(transporter, { issues, recovery });
   console.log(
     `Alert sent → ${ALERT_TO.join(', ')}  messageId=${info.messageId || 'n/a'}`,
   );
   appendLog(
-    `result=alerted issues=${issues.length} restart=${restart ? restart.ok : 'n/a'} to=${ALERT_TO.join(',')}`,
+    `result=alerted issues=${issues.length} recovery=${recovery ? recovery.ok : 'n/a'} to=${ALERT_TO.join(',')}`,
   );
 
-  saveState({ lastAlertAt: new Date().toISOString() });
+  state.lastAlertAt = new Date().toISOString();
+  state = updateSnapshot(state, progress);
+  saveState(state);
 }
 
 main().catch((err) => {
