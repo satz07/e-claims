@@ -806,7 +806,7 @@ function parseArgs(argv) {
     else if (a === '--plan-workers') out.planWorkers = Number(argv[++i]);
     else if (a === '--after') out.after = Number(argv[++i]);
   }
-  out.limit = Math.max(1, Math.min(10_000, Number(out.limit) || 50));
+  out.limit = Math.max(1, Math.min(50_000, Number(out.limit) || 50));
   if (!['claim', 'preauthorization', 'both', 'preauth'].includes(out.use)) {
     out.use = 'both';
   }
