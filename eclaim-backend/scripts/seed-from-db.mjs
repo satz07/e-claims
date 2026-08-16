@@ -788,6 +788,9 @@ function parseArgs(argv) {
     worker: null,
     planWorkers: null,
     after: null,
+    pauseAfterErrors: Number(process.env.SEED_PAUSE_AFTER_ERRORS || 5),
+    pauseMinutes: Number(process.env.SEED_PAUSE_MINUTES || 30),
+    maxPauses: Number(process.env.SEED_PAUSE_MAX || 6),
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -805,8 +808,13 @@ function parseArgs(argv) {
     else if (a === '--worker') out.worker = String(argv[++i]);
     else if (a === '--plan-workers') out.planWorkers = Number(argv[++i]);
     else if (a === '--after') out.after = Number(argv[++i]);
+    else if (a === '--pause-after-errors') out.pauseAfterErrors = Number(argv[++i]);
+    else if (a === '--pause-minutes') out.pauseMinutes = Number(argv[++i]);
   }
   out.limit = Math.max(1, Math.min(50_000, Number(out.limit) || 50));
+  out.pauseAfterErrors = Math.max(1, Math.min(100, Number(out.pauseAfterErrors) || 5));
+  out.pauseMinutes = Math.max(1, Math.min(240, Number(out.pauseMinutes) || 30));
+  out.maxPauses = Math.max(1, Math.min(48, Number(out.maxPauses) || 6));
   if (!['claim', 'preauthorization', 'both', 'preauth'].includes(out.use)) {
     out.use = 'both';
   }
@@ -817,7 +825,13 @@ function parseArgs(argv) {
   if (out.to != null && (!Number.isFinite(out.to) || out.to < 1)) {
     throw new Error('--to must be a positive claim_number');
   }
-  if (out.from != null && out.to != null && out.from > out.to) {
+  if (
+    out.from != null &&
+    out.to != null &&
+    Number.isFinite(out.from) &&
+    Number.isFinite(out.to) &&
+    out.from > out.to
+  ) {
     throw new Error(`--from (${out.from}) must be <= --to (${out.to})`);
   }
   if (out.planWorkers != null && (!Number.isFinite(out.planWorkers) || out.planWorkers < 1)) {
@@ -1157,7 +1171,22 @@ async function importBatch(client, cursor, args) {
   let localSkipped = 0;
   let claimsOk = 0;
   let preauthsOk = 0;
+  let consecutiveInfra = 0;
+  let pauseCount = 0;
+  const pauseAfter = args.pauseAfterErrors;
+  const pauseMs = args.pauseMinutes * 60_000;
   const importedIndex = loadImportedIndex();
+
+  const isInfraError = (err) => {
+    const msg = String(err?.message || err || '');
+    const status = Number(err?.status || 0);
+    return (
+      status >= 500 ||
+      /\b500\b|Internal server error|502 Bad Gateway|Bad Gateway|fetch failed|SERVER_ERROR|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(
+        msg,
+      )
+    );
+  };
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -1208,6 +1237,7 @@ async function importBatch(client, cursor, args) {
       const prev = importedIndex.claims[row.claim_id];
       localSkipped++;
       ok++;
+      consecutiveInfra = 0;
       if (use === 'claim') {
         claimsOk++;
         cursor.totals.claimsOk++;
@@ -1240,6 +1270,7 @@ async function importBatch(client, cursor, args) {
         const out = await api('POST', submitPath, bundle);
         submitted = true;
         ok++;
+        consecutiveInfra = 0;
         if (use === 'claim') {
           claimsOk++;
           cursor.totals.claimsOk++;
@@ -1263,6 +1294,7 @@ async function importBatch(client, cursor, args) {
         if (/already anchored|Already active|duplicate/i.test(msg)) {
           submitted = true;
           ok++;
+          consecutiveInfra = 0;
           if (use === 'claim') {
             claimsOk++;
             cursor.totals.claimsOk++;
@@ -1301,9 +1333,54 @@ async function importBatch(client, cursor, args) {
         `${ts} ERR claim_number=${row.claim_number} claim_id=${row.claim_id} use=${use} fid=${row.fid_code} cr=${row.cr_id} error=${lastError?.message || 'unknown'}`,
       ]);
       console.error(`  ${label} ERR ${lastError?.message}`);
+
+      if (isInfraError(lastError)) {
+        consecutiveInfra++;
+        // Do NOT advance cursor — stay before this claim so we can retry it
+        saveCursor(cursor);
+        console.warn(
+          `  infra errors streak=${consecutiveInfra}/${pauseAfter} (cursor held at #${cursor.lastClaimNumber})`,
+        );
+
+        if (consecutiveInfra >= pauseAfter) {
+          pauseCount++;
+          appendLines(RUN_LOG, [
+            `RUN PAUSE  ${new Date().toISOString()}  consecutiveInfra=${consecutiveInfra} claim=#${row.claim_number} pauseMin=${args.pauseMinutes} pause=${pauseCount}/${args.maxPauses} err=${lastError?.message || ''}`,
+          ]);
+          console.error(
+            `\n⚠ ${consecutiveInfra} consecutive backend/RPC errors — pausing ${args.pauseMinutes} min (cursor stays at #${cursor.lastClaimNumber}). Will retry same claims after pause.`,
+          );
+
+          if (pauseCount > args.maxPauses) {
+            appendLines(RUN_LOG, [
+              `RUN FATAL  ${new Date().toISOString()}  too many pauses (${pauseCount}) after infra errors — exiting so monitor can restart later`,
+            ]);
+            throw new Error(
+              `Too many infra pauses (${pauseCount}). Last error: ${lastError?.message || 'unknown'}`,
+            );
+          }
+
+          await new Promise((r) => setTimeout(r, pauseMs));
+          consecutiveInfra = 0;
+          console.log(
+            `▶ Resume after pause — retrying from claim #${row.claim_number} (cursor #${cursor.lastClaimNumber})`,
+          );
+          i -= 1; // retry same row
+          continue;
+        }
+
+        // streak not high enough yet — still don't advance; retry next loop item would skip
+        // actually we should not advance and should NOT move to next claim - hold and count
+        // For streak < pauseAfter, still hold cursor and continue to next claim? User wants stop at streak.
+        // Until pause threshold, don't advance so we don't burn claims - but then we'd stuck on same claim forever if we continue without advancing...
+        // Better: until threshold, don't advance AND retry same claim after short wait; at threshold, long pause.
+        await new Promise((r) => setTimeout(r, 5_000));
+        i -= 1;
+        continue;
+      }
     }
 
-    // Always advance cursor past this claim_number so the next run continues
+    // Advance cursor only on success / non-infra errors (business errors)
     cursor.lastClaimNumber = Number(row.claim_number);
     cursor.lastClaimId = row.claim_id;
     cursor.lastBundleId = row.bundle_id;
