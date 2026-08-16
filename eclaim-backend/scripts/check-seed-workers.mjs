@@ -15,6 +15,8 @@
  *   SEED_ALERT_COOLDOWN_MINUTES=360
  *   SEED_ALERT_STALE_MINUTES=45          # no new OK claims / fetch-fail storm
  *   SEED_RECOVERY_COOLDOWN_MINUTES=30     # min gap between auto backend+seed restarts
+ *   SEED_RPC_RETRY_MINUTES=15             # when seed dead / RPC down: re-check every N min
+ *   SEED_RPC_ALERT_COOLDOWN_MINUTES=120   # RPC-down email at most every N min
  *   SEED_ALERT_FROM_NAME=E-Claims Platform Alerts
  *   SEED_ALERT_AUTO_RESTART=true
  *   SEED_ALERT_RESTART_BACKEND=true
@@ -63,6 +65,16 @@ loadEnv(path.join(root, '.env'));
 const COOLDOWN_MIN = Number(process.env.SEED_ALERT_COOLDOWN_MINUTES || 360);
 const RECOVERY_COOLDOWN_MIN = Number(
   process.env.SEED_RECOVERY_COOLDOWN_MINUTES || 30,
+);
+/** How often to re-check / retry after seed dies (esp. RPC outages). */
+const RPC_RETRY_MIN = Number(
+  process.env.SEED_RPC_RETRY_MINUTES ||
+    process.env.SEED_RECOVERY_COOLDOWN_MINUTES ||
+    15,
+);
+/** How often to email when RPC stays down (checks can be more frequent). */
+const RPC_EMAIL_COOLDOWN_MIN = Number(
+  process.env.SEED_RPC_ALERT_COOLDOWN_MINUTES || 120,
 );
 const STALE_MIN = Number(process.env.SEED_ALERT_STALE_MINUTES || 45);
 const AUTO_RESTART =
@@ -115,7 +127,12 @@ function appendLog(line) {
 }
 
 function defaultState() {
-  return { lastAlertAt: null, lastRecoveryAt: null, lastSnapshot: null };
+  return {
+    lastAlertAt: null,
+    lastRecoveryAt: null,
+    lastRpcAlertAt: null,
+    lastSnapshot: null,
+  };
 }
 
 function loadState() {
@@ -141,11 +158,22 @@ function shouldAlert(state) {
   return ageMs >= COOLDOWN_MIN * 60_000;
 }
 
-function shouldRecover(state) {
+function shouldRecover(state, issues = []) {
   if (FORCE_RESTART) return true;
   if (!state.lastRecoveryAt) return true;
+  const rpcRelated = issues.some(
+    (i) => i.kind === 'rpc_down' || i.kind === 'no_process',
+  );
+  const mins = rpcRelated ? RPC_RETRY_MIN : RECOVERY_COOLDOWN_MIN;
   const ageMs = Date.now() - new Date(state.lastRecoveryAt).getTime();
-  return ageMs >= RECOVERY_COOLDOWN_MIN * 60_000;
+  return ageMs >= mins * 60_000;
+}
+
+function shouldRpcAlert(state) {
+  if (FORCE) return true;
+  if (!state.lastRpcAlertAt) return true;
+  const ageMs = Date.now() - new Date(state.lastRpcAlertAt).getTime();
+  return ageMs >= RPC_EMAIL_COOLDOWN_MIN * 60_000;
 }
 
 function listSeedProcesses() {
@@ -343,17 +371,19 @@ function buildIssues(processes, state, { rpcHealth, logInfo } = {}) {
     Number(progress.lastClaimNumber) >= Number(range.to);
 
   const log = logInfo || analyzeRunLog(RESTART_WORKER);
+  const rpcLiveDown = rpcHealth && !rpcHealth.ok && !rpcHealth.skipped;
 
-  // RPC outage — highest priority (do not restart seed while chain RPC is down)
-  if ((rpcHealth && !rpcHealth.ok && !rpcHealth.skipped) || log.rpcFatal) {
-    const rpcDetail = rpcHealth && !rpcHealth.ok
-      ? `Blockchain RPC is unreachable (${rpcHealth.url || RPC_URL || 'RPC'} → ${rpcHealth.error || rpcHealth.status}).`
-      : `Import log shows a fatal RPC error: ${log.rpcFatalSnippet || '502 Bad Gateway'}.`;
+  // Live RPC down only — old RUN FATAL in log must NOT block restart once RPC recovers
+  if (rpcLiveDown) {
+    const rpcDetail = `Blockchain RPC is unreachable (${rpcHealth.url || RPC_URL || 'RPC'} → ${rpcHealth.error || rpcHealth.status}).`;
+    const logExtra = log.rpcFatal
+      ? ` Import last exited with: ${log.rpcFatalSnippet || '502 Bad Gateway'}.`
+      : '';
     issues.push({
       kind: 'rpc_down',
       worker: RESTART_WORKER,
       message: 'Blockchain network is unavailable',
-      detail: `${rpcDetail} Claims cannot be anchored on-chain until the Apeiro RPC recovers. Restarting the import service will not help while the network is down.`,
+      detail: `${rpcDetail}${logExtra} Claims cannot be anchored on-chain until the Apeiro RPC recovers. The monitor re-checks every ${RPC_RETRY_MIN} minutes and will restart import when RPC is healthy. Email alerts are sent at most every ${RPC_EMAIL_COOLDOWN_MIN} minutes while RPC remains down.`,
       lastImportedAt: progress?.lastImportedAt,
       lastClaimNumber: progress?.lastClaimNumber,
       claimsOk: Number(progress?.totals?.claimsOk ?? 0),
@@ -362,22 +392,21 @@ function buildIssues(processes, state, { rpcHealth, logInfo } = {}) {
   }
 
   if (processes.length === 0) {
-    // If we already know it's RPC, keep that as primary; still note import stopped
-    if (!issues.some((i) => i.kind === 'rpc_down')) {
+    if (rpcLiveDown) {
       issues.push({
         kind: 'no_process',
         worker: RESTART_WORKER,
-        message: 'Claims database import is not running',
-        detail:
-          'The service that imports claims from the database and anchors them on the blockchain is stopped. No new claims are being processed.',
+        message: 'Claims database import stopped after RPC failure',
+        detail: `The import process is not running. Last failure looks RPC-related. Will auto-restart when RPC is healthy (retry every ${RPC_RETRY_MIN} min).`,
       });
     } else {
       issues.push({
         kind: 'no_process',
         worker: RESTART_WORKER,
-        message: 'Claims database import stopped after RPC failure',
-        detail:
-          'The import process exited because the blockchain RPC returned an error (commonly 502 Bad Gateway). It will need a restart after the network recovers.',
+        message: 'Claims database import is not running',
+        detail: log.rpcFatal
+          ? `Import is stopped (previous exit was RPC error). Blockchain RPC is healthy again — import can be restarted.`
+          : 'The service that imports claims from the database and anchors them on the blockchain is stopped. No new claims are being processed.',
       });
     }
     return issues;
@@ -552,15 +581,22 @@ function killSeedProcesses(processes, issues) {
 }
 
 async function tryRecovery(issues) {
-  if (issues.some((i) => i.kind === 'rpc_down')) {
+  // Re-probe RPC right before restart so we don't start while still 502
+  const rpcNow = await checkRpcHealth();
+  if (!rpcNow.skipped && !rpcNow.ok) {
     return {
       ok: false,
       skipped: true,
+      rpcStillDown: true,
       backend: { skipped: true },
       seed: { skipped: true },
-      reason:
-        'Blockchain RPC is down — skipped backend/import restart. Import will resume after the network recovers.',
+      reason: `Blockchain RPC still down (${rpcNow.error || rpcNow.status}) — skipped restart. Will retry in ${RPC_RETRY_MIN} min.`,
     };
+  }
+
+  if (issues.some((i) => i.kind === 'rpc_down') && rpcNow.ok) {
+    // RPC recovered since issue build — continue with restart
+    appendLog('rpc recovered before restart — proceeding');
   }
 
   const range = resolveRestartRange();
@@ -740,7 +776,7 @@ async function sendAlert(transporter, { issues, recovery }) {
   let actionText;
   if (primary.kind === 'rpc_down') {
     actionText =
-      'The Apeiro blockchain RPC is currently unavailable. Claims import cannot continue until the network recovers. No server restart is required for this outage — monitoring will restart import automatically after RPC is healthy again, or you can restart Worker E manually once RPC responds.';
+      `The Apeiro blockchain RPC is currently unavailable. Claims import cannot continue until the network recovers. The monitor re-checks every ${RPC_RETRY_MIN} minutes and will restart import when RPC is healthy. You will receive RPC-down emails at most every ${RPC_EMAIL_COOLDOWN_MIN} minutes while the outage continues.`;
   } else if (recovered) {
     actionText =
       'The platform automatically restarted the E-Claims backend and claims import service. Monitoring will continue — no manual action is required unless another alert arrives.';
@@ -899,6 +935,8 @@ async function main() {
   console.log(`Alert to:         ${ALERT_TO.join(', ') || '(none)'}`);
   console.log(`Email cooldown:   ${COOLDOWN_MIN} min`);
   console.log(`Recovery cooldown:${RECOVERY_COOLDOWN_MIN} min`);
+  console.log(`RPC retry every:  ${RPC_RETRY_MIN} min`);
+  console.log(`RPC email every:  ${RPC_EMAIL_COOLDOWN_MIN} min`);
   console.log(`Stale threshold:  ${STALE_MIN > 0 ? `${STALE_MIN} min` : 'off'}`);
   console.log(
     `Auto-recovery:    ${doRestart ? `on (pm2 ${PM2_NAME} + seed ${RESTART_WORKER})` : 'off'}`,
@@ -950,7 +988,7 @@ async function main() {
     );
   }
   if (logInfo.rpcFatal) {
-    console.log(`Log: RPC FATAL detected — ${logInfo.rpcFatalSnippet.slice(0, 100)}`);
+    console.log(`Log: last RPC FATAL — ${logInfo.rpcFatalSnippet.slice(0, 100)}`);
   }
 
   const issues = buildIssues(processes, state, { rpcHealth, logInfo });
@@ -972,26 +1010,33 @@ async function main() {
 
   const rpcDown = issues.some((i) => i.kind === 'rpc_down');
   let recovery = null;
-  if (doRestart && shouldRecover(state)) {
-    if (DRY_RUN) {
+
+  if (doRestart && shouldRecover(state, issues)) {
+    // Always stamp retry window so we re-check every N minutes
+    state.lastRecoveryAt = new Date().toISOString();
+
+    if (rpcDown) {
+      recovery = {
+        ok: false,
+        skipped: true,
+        rpcStillDown: true,
+        reason: `RPC still down — no restart. Will retry in ${RPC_RETRY_MIN} min.`,
+      };
+      console.log(
+        `RPC down — skip restart; email if due; retry in ${RPC_RETRY_MIN} min`,
+      );
+      appendLog(`recovery skipped rpc-down retry_in=${RPC_RETRY_MIN}m`);
+    } else if (DRY_RUN) {
       recovery = {
         ok: true,
         skipped: true,
-        reason: rpcDown
-          ? 'Dry-run — would alert RPC down (no restart)'
-          : 'Dry-run — would restart backend + seed',
+        reason: 'Dry-run — would restart backend + seed (RPC is up)',
       };
       console.log(
-        rpcDown
-          ? '[dry-run] would email RPC-down alert (skip restart)'
-          : `[dry-run] would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
+        `[dry-run] RPC up → would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
       );
     } else {
-      console.log(
-        rpcDown
-          ? 'RPC down — skipping auto-restart; sending alert…'
-          : 'Attempting auto-recovery (backend + seed)…',
-      );
+      console.log('RPC up — attempting auto-recovery (backend + seed)…');
       recovery = await tryRecovery(issues);
       console.log(
         recovery.ok || recovery.skipped
@@ -1001,26 +1046,42 @@ async function main() {
       appendLog(
         `recovery ok=${recovery.ok} skipped=${!!recovery.skipped} ${recovery.reason}`,
       );
-      if (!recovery.skipped) {
-        state.lastRecoveryAt = new Date().toISOString();
+      // If tryRecovery found RPC still down at last second, treat as rpc down
+      if (recovery.rpcStillDown) {
+        issues.unshift({
+          kind: 'rpc_down',
+          worker: RESTART_WORKER,
+          message: 'Blockchain network is unavailable',
+          detail: recovery.reason,
+        });
       }
     }
   } else if (doRestart) {
+    const age = state.lastRecoveryAt
+      ? Math.round(
+          (Date.now() - new Date(state.lastRecoveryAt).getTime()) / 60_000,
+        )
+      : 0;
     console.log(
-      `Recovery suppressed (cooldown ${RECOVERY_COOLDOWN_MIN} min). Use --restart to force.`,
+      `Retry wait: last attempt ${age} min ago (every ${RPC_RETRY_MIN} min for stopped/RPC). Use --restart to force.`,
     );
-    appendLog(`result=recovery-cooldown issues=${issues.length}`);
+    appendLog(`result=recovery-cooldown issues=${issues.length} ageMin=${age}`);
   }
 
+  const rpcDownNow =
+    rpcDown || issues.some((i) => i.kind === 'rpc_down') || recovery?.rpcStillDown;
+
   const sendMail =
+    (rpcDownNow && shouldRpcAlert(state)) ||
     shouldAlert(state) ||
-    rpcDown ||
     (recovery && !recovery.ok && !recovery.skipped) ||
     (recovery?.ok && !recovery?.skipped);
 
   if (!sendMail) {
     console.log(
-      `Email suppressed (cooldown ${COOLDOWN_MIN} min). Use --force to re-send.`,
+      rpcDownNow
+        ? `RPC-down email suppressed (email at most every ${RPC_EMAIL_COOLDOWN_MIN} min; RPC re-check every ${RPC_RETRY_MIN} min). Use --force to re-send.`
+        : `Email suppressed (cooldown ${COOLDOWN_MIN} min). Use --force to re-send.`,
     );
     state = updateSnapshot(state, progress);
     saveState(state);
@@ -1048,6 +1109,7 @@ async function main() {
   );
 
   state.lastAlertAt = new Date().toISOString();
+  if (rpcDownNow) state.lastRpcAlertAt = state.lastAlertAt;
   state = updateSnapshot(state, progress);
   saveState(state);
 }
