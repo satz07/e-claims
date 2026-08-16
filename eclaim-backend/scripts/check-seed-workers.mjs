@@ -25,6 +25,8 @@
  *   SEED_RESTART_LIMIT=10000
  *   SEED_RESTART_SKIP_ENSURE=true        # pass --skip-ensure-registries on restart
  *   SEED_RESTART_HEALTH_URL=http://localhost:8001/api/health
+ *   SEED_ALERT_CHECK_RPC=true
+ *   SEED_ALERT_RPC_URL=https://rpc.apeiro.adifoundation.ai  (falls back to APEIRO_RPC_URL / ECLAIM_RPC_URL)
  */
 import fs from 'fs';
 import path from 'path';
@@ -77,6 +79,15 @@ const SKIP_ENSURE =
   'true';
 const HEALTH_URL =
   process.env.SEED_RESTART_HEALTH_URL || 'http://localhost:8001/api/health';
+const CHECK_RPC =
+  String(process.env.SEED_ALERT_CHECK_RPC || 'true').toLowerCase() === 'true';
+const RPC_URL = (
+  process.env.SEED_ALERT_RPC_URL ||
+  process.env.APEIRO_RPC_URL ||
+  process.env.ECLAIM_RPC_URL ||
+  process.env.BALANCE_ALERT_RPC_URL ||
+  ''
+).replace(/\/$/, '');
 
 const ALERT_TO = String(
   process.env.SEED_ALERT_TO ||
@@ -202,6 +213,17 @@ function analyzeRunLog(worker) {
     /Ensuring registries for run:/i.test(text) &&
     !/RUN START/i.test(text.slice(text.lastIndexOf('Ensuring registries')));
   const lastLine = tail.filter(Boolean).at(-1) || '';
+  const rpcFatal =
+    /RUN FATAL/i.test(text) &&
+    /502 Bad Gateway|SERVER_ERROR|rpc\.apeiro|eth_sendRawTransaction|ECONNREFUSED|ETIMEDOUT/i.test(
+      text,
+    );
+  const rpcFatalSnippet = (() => {
+    const line = [...tail]
+      .reverse()
+      .find((l) => /RUN FATAL|502 Bad Gateway|Bad Gateway/i.test(l));
+    return line ? line.slice(0, 200) : '';
+  })();
 
   return {
     fetchFailRetries,
@@ -211,7 +233,68 @@ function analyzeRunLog(worker) {
     lastLine: lastLine.slice(0, 120),
     apiStuck:
       fetchFailRetries >= 3 && okTxRecent === 0 && errRecent > 0,
+    rpcFatal,
+    rpcFatalSnippet,
   };
+}
+
+/** Live JSON-RPC probe (eth_blockNumber). */
+async function checkRpcHealth() {
+  if (!CHECK_RPC || !RPC_URL) {
+    return { ok: true, skipped: true, reason: 'RPC check disabled or URL unset' };
+  }
+  try {
+    const res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_blockNumber',
+        params: [],
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) {
+      const body = (await res.text().catch(() => '')).slice(0, 120);
+      return {
+        ok: false,
+        status: res.status,
+        error: `HTTP ${res.status}${body ? `: ${body.trim()}` : ''}`,
+        url: RPC_URL,
+      };
+    }
+    const data = await res.json().catch(() => null);
+    if (data?.error) {
+      return {
+        ok: false,
+        status: res.status,
+        error: data.error.message || JSON.stringify(data.error),
+        url: RPC_URL,
+      };
+    }
+    if (!data?.result) {
+      return {
+        ok: false,
+        status: res.status,
+        error: 'empty eth_blockNumber result',
+        url: RPC_URL,
+      };
+    }
+    return {
+      ok: true,
+      status: res.status,
+      blockNumber: data.result,
+      url: RPC_URL,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      error: err.message,
+      url: RPC_URL,
+    };
+  }
 }
 
 function resolveRestartRange() {
@@ -250,7 +333,7 @@ function createMailer() {
   });
 }
 
-function buildIssues(processes, state) {
+function buildIssues(processes, state, { rpcHealth, logInfo } = {}) {
   const issues = [];
   const progress = readProgress(RESTART_WORKER);
   const range = progress?.range;
@@ -259,21 +342,50 @@ function buildIssues(processes, state) {
     progress?.lastClaimNumber != null &&
     Number(progress.lastClaimNumber) >= Number(range.to);
 
-  if (processes.length === 0) {
+  const log = logInfo || analyzeRunLog(RESTART_WORKER);
+
+  // RPC outage — highest priority (do not restart seed while chain RPC is down)
+  if ((rpcHealth && !rpcHealth.ok && !rpcHealth.skipped) || log.rpcFatal) {
+    const rpcDetail = rpcHealth && !rpcHealth.ok
+      ? `Blockchain RPC is unreachable (${rpcHealth.url || RPC_URL || 'RPC'} → ${rpcHealth.error || rpcHealth.status}).`
+      : `Import log shows a fatal RPC error: ${log.rpcFatalSnippet || '502 Bad Gateway'}.`;
     issues.push({
-      kind: 'no_process',
+      kind: 'rpc_down',
       worker: RESTART_WORKER,
-      message: 'Claims database import is not running',
-      detail:
-        'The service that imports claims from the database and anchors them on the blockchain is stopped. No new claims are being processed.',
+      message: 'Blockchain network is unavailable',
+      detail: `${rpcDetail} Claims cannot be anchored on-chain until the Apeiro RPC recovers. Restarting the import service will not help while the network is down.`,
+      lastImportedAt: progress?.lastImportedAt,
+      lastClaimNumber: progress?.lastClaimNumber,
+      claimsOk: Number(progress?.totals?.claimsOk ?? 0),
+      range,
     });
+  }
+
+  if (processes.length === 0) {
+    // If we already know it's RPC, keep that as primary; still note import stopped
+    if (!issues.some((i) => i.kind === 'rpc_down')) {
+      issues.push({
+        kind: 'no_process',
+        worker: RESTART_WORKER,
+        message: 'Claims database import is not running',
+        detail:
+          'The service that imports claims from the database and anchors them on the blockchain is stopped. No new claims are being processed.',
+      });
+    } else {
+      issues.push({
+        kind: 'no_process',
+        worker: RESTART_WORKER,
+        message: 'Claims database import stopped after RPC failure',
+        detail:
+          'The import process exited because the blockchain RPC returned an error (commonly 502 Bad Gateway). It will need a restart after the network recovers.',
+      });
+    }
     return issues;
   }
 
   if (complete) return issues;
 
   const workerProc = processes.find((p) => p.worker === RESTART_WORKER);
-  const logInfo = analyzeRunLog(RESTART_WORKER);
   const claimsOk = Number(progress?.totals?.claimsOk ?? 0);
   const snap = state.lastSnapshot;
 
@@ -316,19 +428,19 @@ function buildIssues(processes, state) {
     }
   }
 
-  if (workerProc && logInfo.apiStuck) {
+  if (workerProc && log.apiStuck) {
     issues.push({
       kind: 'api_stuck',
       worker: RESTART_WORKER,
       message: 'Import API unreachable (fetch failed)',
-      detail: `The import log shows repeated "fetch failed" retries with no recent successful transactions. Last log: ${logInfo.lastLine}`,
+      detail: `The import log shows repeated "fetch failed" retries with no recent successful transactions. Last log: ${log.lastLine}`,
       lastClaimNumber: progress?.lastClaimNumber,
       claimsOk,
       range,
     });
   }
 
-  if (workerProc && logInfo.ensuringStuck && !issues.length) {
+  if (workerProc && log.ensuringStuck && !issues.some((i) => i.kind === 'rpc_down')) {
     issues.push({
       kind: 'registry_stuck',
       worker: RESTART_WORKER,
@@ -440,6 +552,17 @@ function killSeedProcesses(processes, issues) {
 }
 
 async function tryRecovery(issues) {
+  if (issues.some((i) => i.kind === 'rpc_down')) {
+    return {
+      ok: false,
+      skipped: true,
+      backend: { skipped: true },
+      seed: { skipped: true },
+      reason:
+        'Blockchain RPC is down — skipped backend/import restart. Import will resume after the network recovers.',
+    };
+  }
+
   const range = resolveRestartRange();
   if (!range) {
     return {
@@ -584,19 +707,23 @@ async function sendAlert(transporter, { issues, recovery }) {
     ? '[E-Claims] Claims import auto-recovered (backend + import restarted)'
     : recoveryFailed
       ? '[E-Claims] Claims import stuck — auto-recovery failed'
-      : primary.kind === 'no_process'
-        ? '[E-Claims] Claims database import is not running'
-        : primary.kind === 'api_stuck'
-          ? '[E-Claims] Claims import API unreachable'
-          : '[E-Claims] Claims database import has stalled';
+      : primary.kind === 'rpc_down'
+        ? '[E-Claims] Blockchain network unavailable (RPC down)'
+        : primary.kind === 'no_process'
+          ? '[E-Claims] Claims database import is not running'
+          : primary.kind === 'api_stuck'
+            ? '[E-Claims] Claims import API unreachable'
+            : '[E-Claims] Claims database import has stalled';
 
   const statusLabel = recovered
     ? 'RECOVERED'
     : recoveryFailed
       ? 'FAILED'
-      : primary.kind === 'no_process'
-        ? 'STOPPED'
-        : 'STALLED';
+      : primary.kind === 'rpc_down'
+        ? 'RPC DOWN'
+        : primary.kind === 'no_process'
+          ? 'STOPPED'
+          : 'STALLED';
   const statusColor =
     statusLabel === 'RECOVERED'
       ? '#2e7d32'
@@ -611,7 +738,10 @@ async function sendAlert(transporter, { issues, recovery }) {
         : '#ffebee';
 
   let actionText;
-  if (recovered) {
+  if (primary.kind === 'rpc_down') {
+    actionText =
+      'The Apeiro blockchain RPC is currently unavailable. Claims import cannot continue until the network recovers. No server restart is required for this outage — monitoring will restart import automatically after RPC is healthy again, or you can restart Worker E manually once RPC responds.';
+  } else if (recovered) {
     actionText =
       'The platform automatically restarted the E-Claims backend and claims import service. Monitoring will continue — no manual action is required unless another alert arrives.';
   } else if (recoveryFailed) {
@@ -773,6 +903,7 @@ async function main() {
   console.log(
     `Auto-recovery:    ${doRestart ? `on (pm2 ${PM2_NAME} + seed ${RESTART_WORKER})` : 'off'}`,
   );
+  console.log(`RPC check:        ${CHECK_RPC ? RPC_URL || '(unset)' : 'off'}`);
   console.log(
     `Mode:             ${DRY_RUN ? 'dry-run' : FORCE ? 'force' : 'normal'}`,
   );
@@ -781,6 +912,17 @@ async function main() {
     throw new Error(
       'SEED_ALERT_TO (or BALANCE_ALERT_TO / MAIL_DEFAULT_EMAIL) is required',
     );
+  }
+
+  const rpcHealth = await checkRpcHealth();
+  if (rpcHealth.skipped) {
+    console.log('RPC:              skipped');
+  } else if (rpcHealth.ok) {
+    console.log(`RPC:              ok block=${rpcHealth.blockNumber}`);
+    appendLog(`rpc ok block=${rpcHealth.blockNumber}`);
+  } else {
+    console.log(`RPC:              DOWN ${rpcHealth.error || rpcHealth.status}`);
+    appendLog(`rpc down ${rpcHealth.error || rpcHealth.status} url=${rpcHealth.url}`);
   }
 
   const processes = listSeedProcesses();
@@ -807,8 +949,11 @@ async function main() {
       `Log: fetch-fail retries=${logInfo.fetchFailRetries} recent OK tx=${logInfo.okTxRecent}`,
     );
   }
+  if (logInfo.rpcFatal) {
+    console.log(`Log: RPC FATAL detected — ${logInfo.rpcFatalSnippet.slice(0, 100)}`);
+  }
 
-  const issues = buildIssues(processes, state);
+  const issues = buildIssues(processes, state, { rpcHealth, logInfo });
 
   if (!issues.length) {
     console.log('OK — import healthy.');
@@ -825,22 +970,33 @@ async function main() {
     );
   }
 
+  const rpcDown = issues.some((i) => i.kind === 'rpc_down');
   let recovery = null;
   if (doRestart && shouldRecover(state)) {
     if (DRY_RUN) {
       recovery = {
         ok: true,
         skipped: true,
-        reason: 'Dry-run — would restart backend + seed',
+        reason: rpcDown
+          ? 'Dry-run — would alert RPC down (no restart)'
+          : 'Dry-run — would restart backend + seed',
       };
       console.log(
-        `[dry-run] would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
+        rpcDown
+          ? '[dry-run] would email RPC-down alert (skip restart)'
+          : `[dry-run] would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
       );
     } else {
-      console.log('Attempting auto-recovery (backend + seed)…');
+      console.log(
+        rpcDown
+          ? 'RPC down — skipping auto-restart; sending alert…'
+          : 'Attempting auto-recovery (backend + seed)…',
+      );
       recovery = await tryRecovery(issues);
       console.log(
-        recovery.ok ? `Recovery: ${recovery.reason}` : `Recovery FAILED: ${recovery.reason}`,
+        recovery.ok || recovery.skipped
+          ? `Recovery: ${recovery.reason}`
+          : `Recovery FAILED: ${recovery.reason}`,
       );
       appendLog(
         `recovery ok=${recovery.ok} skipped=${!!recovery.skipped} ${recovery.reason}`,
@@ -858,6 +1014,7 @@ async function main() {
 
   const sendMail =
     shouldAlert(state) ||
+    rpcDown ||
     (recovery && !recovery.ok && !recovery.skipped) ||
     (recovery?.ok && !recovery?.skipped);
 
