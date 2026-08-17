@@ -1,0 +1,232 @@
+{
+  "generatedAt": "2026-08-17T08:24:59.754Z",
+  "l3Head": {
+    "ok": true,
+    "rpc": "https://rpc.apeiro.adifoundation.ai",
+    "chainId": 37001,
+    "blockNumber": 62932,
+    "blockTimestamp": "2026-08-17T08:04:30.000Z"
+  },
+  "l2Head": {
+    "ok": true,
+    "rpc": "https://rpc.adifoundation.ai",
+    "chainId": 36900,
+    "blockNumber": 931335
+  },
+  "l3Bls": {
+    "label": "Apeiro L2 settlement (BLS)",
+    "ok": true,
+    "url": "https://explorer-bls.apeiro.adifoundation.ai",
+    "totalBlocks": 62933,
+    "totalTransactions": 89367,
+    "transactionsToday": 21,
+    "totalAddresses": 52,
+    "gasUsedToday": "7056323",
+    "averageBlockTimeMs": 1563848,
+    "networkUtilizationPct": 0.41889216
+  },
+  "l2Bls": {
+    "label": "ADI Mainnet L2 (BLS)",
+    "ok": true,
+    "url": "https://explorer-bls.adifoundation.ai",
+    "totalBlocks": 931331,
+    "totalTransactions": 1615473,
+    "transactionsToday": 22042,
+    "totalAddresses": 697997,
+    "gasUsedToday": "6726796145",
+    "averageBlockTimeMs": 6545,
+    "networkUtilizationPct": 0.56360116
+  },
+  "backendHealth": {
+    "ok": true,
+    "url": "http://localhost:8001/api/public/integration/health",
+    "status": "ok",
+    "blockNumber": 62932,
+    "chainId": 37001,
+    "contracts": {
+      "claimRegistry": "0xC797A6e0c7C2F631F176279980E638FBB255E9B0",
+      "providerRegistry": "0xeda747a951502878079a789DA5D3380dA6Ec2276",
+      "citizenRegistry": "0xb859A8D8e23D8581aafb5e7C03A8CC2F854a9Cc4",
+      "clinicianRegistry": "0xd646829b3310a17B660079acc7F4A97DBFC9ce2D",
+      "insurerRegistry": "0x64e8Ffca1907B0769Bf02cB60DC62D0e1070a591"
+    },
+    "registriesConfigured": {
+      "citizen": true,
+      "clinician": true,
+      "insurer": true
+    },
+    "adiDeliverables": {
+      "baseInfrastructure": "integrated (Spearhead RPC + NestJS)",
+      "identityAndTerminology": "FHIR parser + external terminology URLs in bundles",
+      "verifiableRegistries": "facility + citizen + clinician + insurer (hash-only)",
+      "eClaimPlatform": "FHIR submit → ClaimRegistry anchor",
+      "contractingModules": "not in scope (items d–e pending Apeiro)"
+    }
+  },
+  "backendClaims": {
+    "ok": false,
+    "error": "HTTP 401"
+  },
+  "db": {
+    "skipped": true,
+    "reason": "--skip-db"
+  },
+  "seed": {
+    "workers": [
+      {
+        "worker": "A",
+        "file": "db-seed-progress-A.json",
+        "lastClaimNumber": 379305,
+        "lastImportedAt": "2026-08-13T12:40:26.327Z",
+        "claimsOk": 2191,
+        "preauthsOk": 0,
+        "errors": 181,
+        "skipped": 37,
+        "range": {
+          "from": 376896,
+          "to": 516035,
+          "worker": "A"
+        }
+      },
+      {
+        "worker": "C",
+        "file": "db-seed-progress-C.json",
+        "lastClaimNumber": 376895,
+        "lastImportedAt": "2026-08-06T19:12:36.564Z",
+        "claimsOk": 6881,
+        "preauthsOk": 0,
+        "errors": 10872,
+        "skipped": 281,
+        "range": {
+          "from": 358837,
+          "to": 376895,
+          "worker": "C"
+        }
+      },
+      {
+        "worker": "D",
+        "file": "db-seed-progress-D.json",
+        "lastClaimNumber": 376995,
+        "lastImportedAt": "2026-08-13T12:40:44.406Z",
+        "claimsOk": 98,
+        "preauthsOk": 0,
+        "errors": 0,
+        "skipped": 2,
+        "range": {
+          "from": 376896,
+          "to": 394954,
+          "worker": "D"
+        }
+      },
+      {
+        "worker": "F",
+        "file": "db-seed-progress-F.json",
+        "lastClaimNumber": 413013,
+        "lastImportedAt": null,
+        "claimsOk": 0,
+        "preauthsOk": 0,
+        "errors": 0,
+        "skipped": 0,
+        "range": {
+          "from": 413014,
+          "to": 431072,
+          "worker": "F"
+        }
+      }
+    ],
+    "records": {
+      "ok": 9070,
+      "dup": 5,
+      "err": 11053,
+      "byDay": [
+        {
+          "date": "2026-07-27",
+          "count": 559
+        },
+        {
+          "date": "2026-07-28",
+          "count": 93
+        },
+        {
+          "date": "2026-07-29",
+          "count": 959
+        },
+        {
+          "date": "2026-07-31",
+          "count": 2910
+        },
+        {
+          "date": "2026-08-03",
+          "count": 1154
+        },
+        {
+          "date": "2026-08-04",
+          "count": 826
+        },
+        {
+          "date": "2026-08-05",
+          "count": 378
+        },
+        {
+          "date": "2026-08-12",
+          "count": 809
+        },
+        {
+          "date": "2026-08-13",
+          "count": 1382
+        }
+      ]
+    }
+  },
+  "chainTx": {
+    "txCount": 11287,
+    "totalFeeAdi": 0,
+    "avgFeeAdi": 0,
+    "byDay": [
+      {
+        "date": "2026-07-27",
+        "count": 917
+      },
+      {
+        "date": "2026-07-28",
+        "count": 173
+      },
+      {
+        "date": "2026-07-29",
+        "count": 1355
+      },
+      {
+        "date": "2026-07-31",
+        "count": 4139
+      },
+      {
+        "date": "2026-08-03",
+        "count": 1185
+      },
+      {
+        "date": "2026-08-04",
+        "count": 873
+      },
+      {
+        "date": "2026-08-05",
+        "count": 380
+      },
+      {
+        "date": "2026-08-06",
+        "count": 57
+      },
+      {
+        "date": "2026-08-12",
+        "count": 819
+      },
+      {
+        "date": "2026-08-13",
+        "count": 1389
+      }
+    ]
+  },
+  "chainScan": {
+    "skipped": true,
+    "reason": "--quick mode"
+  }
+}
