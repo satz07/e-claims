@@ -1,0 +1,19 @@
+# Add inside the existing server { } block for eclaim-api.apeiro-digital.com
+# File is usually: /etc/nginx/sites-available/eclaim-api
+# or: /etc/nginx/sites-enabled/default
+
+# Dashboard at https://eclaim-api.apeiro-digital.com/operation/
+location /operation/ {
+    proxy_pass http://127.0.0.1:8090/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+
+# Redirect /operation → /operation/
+location = /operation {
+    return 301 /operation/;
+}

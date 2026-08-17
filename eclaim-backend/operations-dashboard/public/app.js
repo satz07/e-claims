@@ -176,9 +176,14 @@ function render(data) {
   `;
 }
 
+function apiBase() {
+  const p = window.location.pathname.replace(/\/$/, '') || '';
+  return p || '';
+}
+
 async function refresh() {
   try {
-    const res = await fetch('/api/snapshot');
+    const res = await fetch(`${apiBase()}/api/snapshot`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     render(data);

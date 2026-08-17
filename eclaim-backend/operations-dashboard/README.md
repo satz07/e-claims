@@ -50,15 +50,21 @@ server {
 }
 ```
 
-Or under existing API domain:
+Or under existing API domain at **`/operation/`**:
 
 ```nginx
-location /operations/ {
+location /operation/ {
     proxy_pass http://127.0.0.1:8090/;
+    proxy_read_timeout 120s;
+}
+location = /operation {
+    return 301 /operation/;
 }
 ```
 
-Then open: `https://eclaim-api.apeiro-digital.com/operations/`
+Then open: `https://eclaim-api.apeiro-digital.com/operation/`
+
+See `nginx-operation.conf.example` for the full snippet.
 
 ## API
 
