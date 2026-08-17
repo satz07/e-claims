@@ -8,8 +8,10 @@
  *   node scripts/check-seed-workers.mjs --force          # ignore email cooldown
  *   node scripts/check-seed-workers.mjs --no-restart     # alert only
  *   node scripts/check-seed-workers.mjs --restart        # force recovery attempt
+ *   node scripts/check-seed-workers.mjs --loop           # run forever, re-check every SEED_RPC_RETRY_MINUTES (15)
  *
- * Env (.env):
+ * Cron (if not using --loop), every 15 minutes:
+ *   0,15,30,45 * * * * cd ~/e-claims/eclaim-backend && node scripts/check-seed-workers.mjs >> logs/seed-alerts.log 2>&1
  *   MAIL_*
  *   SEED_ALERT_TO=ops@example.com
  *   SEED_ALERT_COOLDOWN_MINUTES=360
@@ -26,7 +28,7 @@
  *   SEED_RESTART_TO=394954
  *   SEED_RESTART_LIMIT=10000
  *   SEED_RESTART_SKIP_ENSURE=true        # pass --skip-ensure-registries on restart
- *   SEED_RESTART_HEALTH_URL=http://localhost:8001/api/health
+ *   SEED_RESTART_HEALTH_URL=http://localhost:8001/api/public/integration/health
  *   SEED_ALERT_CHECK_RPC=true
  *   SEED_ALERT_RPC_URL=https://rpc.apeiro.adifoundation.ai  (falls back to APEIRO_RPC_URL / ECLAIM_RPC_URL)
  */
@@ -116,6 +118,7 @@ const DRY_RUN = args.has('--dry-run');
 const FORCE = args.has('--force');
 const NO_RESTART = args.has('--no-restart');
 const FORCE_RESTART = args.has('--restart');
+const LOOP = args.has('--loop');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -158,15 +161,47 @@ function shouldAlert(state) {
   return ageMs >= COOLDOWN_MIN * 60_000;
 }
 
-function shouldRecover(state, issues = []) {
+function shouldRecover(state, issues = [], rpcHealth = null) {
   if (FORCE_RESTART) return true;
+  const seedStopped = issues.some((i) => i.kind === 'no_process');
+  const rpcDown = issues.some((i) => i.kind === 'rpc_down');
+  const rpcUp = !rpcHealth?.skipped && rpcHealth?.ok;
+
+  // Seed dead + RPC healthy → retry import every SEED_RPC_RETRY_MINUTES
+  if (seedStopped && rpcUp) {
+    if (!state.lastRecoveryAt) return true;
+    const ageMs = Date.now() - new Date(state.lastRecoveryAt).getTime();
+    return ageMs >= RPC_RETRY_MIN * 60_000;
+  }
+
+  if (rpcDown) {
+    if (!state.lastRecoveryAt) return true;
+    const ageMs = Date.now() - new Date(state.lastRecoveryAt).getTime();
+    return ageMs >= RPC_RETRY_MIN * 60_000;
+  }
+
   if (!state.lastRecoveryAt) return true;
-  const rpcRelated = issues.some(
-    (i) => i.kind === 'rpc_down' || i.kind === 'no_process',
-  );
-  const mins = rpcRelated ? RPC_RETRY_MIN : RECOVERY_COOLDOWN_MIN;
   const ageMs = Date.now() - new Date(state.lastRecoveryAt).getTime();
-  return ageMs >= mins * 60_000;
+  return ageMs >= RECOVERY_COOLDOWN_MIN * 60_000;
+}
+
+function minutesSince(iso) {
+  if (!iso) return null;
+  return Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+}
+
+function minutesUntilRecovery(state, issues = [], rpcHealth = null) {
+  if (!state.lastRecoveryAt) return 0;
+  const seedStopped = issues.some((i) => i.kind === 'no_process');
+  const rpcUp = !rpcHealth?.skipped && rpcHealth?.ok;
+  const mins =
+    seedStopped && rpcUp
+      ? RPC_RETRY_MIN
+      : issues.some((i) => i.kind === 'rpc_down')
+        ? RPC_RETRY_MIN
+        : RECOVERY_COOLDOWN_MIN;
+  const age = minutesSince(state.lastRecoveryAt) ?? 0;
+  return Math.max(0, mins - age);
 }
 
 function shouldRpcAlert(state) {
@@ -507,14 +542,26 @@ function formatWhen(iso) {
 }
 
 async function checkBackendHealth() {
-  try {
-    const res = await fetch(HEALTH_URL, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    return { ok: res.ok, status: res.status };
-  } catch (err) {
-    return { ok: false, status: 0, error: err.message };
+  const urls = [
+    HEALTH_URL,
+    'http://localhost:8001/api/public/integration/health',
+    'http://127.0.0.1:8001/api/public/integration/health',
+    'http://localhost:8001/api/health',
+  ].filter((u, i, a) => u && a.indexOf(u) === i);
+
+  let lastErr = { ok: false, status: 0, error: 'unreachable' };
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) return { ok: true, status: res.status, url };
+      lastErr = { ok: false, status: res.status, error: `HTTP ${res.status}`, url };
+    } catch (err) {
+      lastErr = { ok: false, status: 0, error: err.message, url };
+    }
   }
+  return lastErr;
 }
 
 async function tryRestartBackend() {
@@ -624,7 +671,7 @@ async function tryRecovery(issues) {
   const needsBackend =
     RESTART_BACKEND &&
     issues.some((i) =>
-      ['api_stuck', 'registry_stuck', 'stale_progress', 'no_onchain_progress', 'no_process'].includes(
+      ['api_stuck', 'registry_stuck', 'stale_progress', 'no_onchain_progress'].includes(
         i.kind,
       ),
     );
@@ -643,14 +690,19 @@ async function tryRecovery(issues) {
   } else {
     const health = await checkBackendHealth();
     if (!health.ok) {
-      backend = await tryRestartBackend();
-      if (!backend.ok) {
-        return {
-          ok: false,
-          backend,
-          seed: null,
-          reason: backend.reason,
-        };
+      // Import stopped only — try pm2 once; if still bad, still attempt seed start
+      if (issues.some((i) => i.kind === 'no_process') && issues.length === 1) {
+        appendLog(`backend health fail (${health.error || health.status}) — still starting seed`);
+      } else {
+        backend = await tryRestartBackend();
+        if (!backend.ok) {
+          return {
+            ok: false,
+            backend,
+            seed: null,
+            reason: backend.reason,
+          };
+        }
       }
     }
   }
@@ -728,7 +780,7 @@ async function tryRecovery(issues) {
   return { ok, skipped: false, backend, seed, reason };
 }
 
-async function sendAlert(transporter, { issues, recovery }) {
+async function sendAlert(transporter, { issues, recovery, rpcHealth, autoRestart, retryInMin }) {
   const fromName =
     process.env.SEED_ALERT_FROM_NAME || 'E-Claims Platform Alerts';
   const fromEmail = process.env.MAIL_DEFAULT_EMAIL || process.env.MAIL_USER;
@@ -784,6 +836,13 @@ async function sendAlert(transporter, { issues, recovery }) {
     actionText = `Automatic recovery was attempted but did not fully succeed: ${recovery.reason} Please investigate the E-Claims blockchain server manually.`;
   } else if (recovery?.skipped) {
     actionText = recovery.reason;
+  } else if (
+    !recovery &&
+    autoRestart &&
+    primary.kind === 'no_process' &&
+    rpcHealth?.ok
+  ) {
+    actionText = `Automatic restart is enabled. The monitor re-checks every ${RPC_RETRY_MIN} minutes and will start the import service when the blockchain RPC is healthy (RPC is healthy now).${retryInMin > 0 ? ` Next restart attempt in about ${retryInMin} minute(s).` : ' Restart will be attempted on the next check.'} No manual action is required unless this alert repeats without recovery.`;
   } else if (!recovery) {
     actionText =
       'Please investigate the import service on the E-Claims blockchain server. The backend and import process may need to be restarted.';
@@ -943,7 +1002,7 @@ async function main() {
   );
   console.log(`RPC check:        ${CHECK_RPC ? RPC_URL || '(unset)' : 'off'}`);
   console.log(
-    `Mode:             ${DRY_RUN ? 'dry-run' : FORCE ? 'force' : 'normal'}`,
+    `Mode:             ${DRY_RUN ? 'dry-run' : FORCE ? 'force' : LOOP ? 'loop' : 'normal'}`,
   );
 
   if (!ALERT_TO.length) {
@@ -1009,34 +1068,35 @@ async function main() {
   }
 
   const rpcDown = issues.some((i) => i.kind === 'rpc_down');
+  const seedStopped = issues.some((i) => i.kind === 'no_process');
+  const rpcUp = !rpcHealth?.skipped && rpcHealth?.ok;
   let recovery = null;
+  const retryInMin = minutesUntilRecovery(state, issues, rpcHealth);
 
-  if (doRestart && shouldRecover(state, issues)) {
-    // Always stamp retry window so we re-check every N minutes
-    state.lastRecoveryAt = new Date().toISOString();
-
+  if (doRestart && shouldRecover(state, issues, rpcHealth)) {
     if (rpcDown) {
       recovery = {
         ok: false,
         skipped: true,
         rpcStillDown: true,
-        reason: `RPC still down — no restart. Will retry in ${RPC_RETRY_MIN} min.`,
+        reason: `RPC still down — no restart. Will re-check in ${RPC_RETRY_MIN} min.`,
       };
       console.log(
-        `RPC down — skip restart; email if due; retry in ${RPC_RETRY_MIN} min`,
+        `RPC down — skip restart; email if due; re-check in ${RPC_RETRY_MIN} min`,
       );
       appendLog(`recovery skipped rpc-down retry_in=${RPC_RETRY_MIN}m`);
     } else if (DRY_RUN) {
       recovery = {
         ok: true,
         skipped: true,
-        reason: 'Dry-run — would restart backend + seed (RPC is up)',
+        reason: 'Dry-run — would restart seed (RPC is up)',
       };
       console.log(
-        `[dry-run] RPC up → would pm2 restart ${PM2_NAME} + restart worker ${RESTART_WORKER}`,
+        `[dry-run] RPC up → would restart worker ${RESTART_WORKER}`,
       );
     } else {
-      console.log('RPC up — attempting auto-recovery (backend + seed)…');
+      console.log('RPC up — attempting auto-recovery (restart import)…');
+      state.lastRecoveryAt = new Date().toISOString();
       recovery = await tryRecovery(issues);
       console.log(
         recovery.ok || recovery.skipped
@@ -1046,7 +1106,6 @@ async function main() {
       appendLog(
         `recovery ok=${recovery.ok} skipped=${!!recovery.skipped} ${recovery.reason}`,
       );
-      // If tryRecovery found RPC still down at last second, treat as rpc down
       if (recovery.rpcStillDown) {
         issues.unshift({
           kind: 'rpc_down',
@@ -1057,15 +1116,13 @@ async function main() {
       }
     }
   } else if (doRestart) {
-    const age = state.lastRecoveryAt
-      ? Math.round(
-          (Date.now() - new Date(state.lastRecoveryAt).getTime()) / 60_000,
-        )
-      : 0;
+    const age = minutesSince(state.lastRecoveryAt) ?? 0;
     console.log(
-      `Retry wait: last attempt ${age} min ago (every ${RPC_RETRY_MIN} min for stopped/RPC). Use --restart to force.`,
+      `Retry wait: last attempt ${age} min ago — next in ~${retryInMin} min (every ${RPC_RETRY_MIN} min when stopped + RPC up). Use --restart to force.`,
     );
-    appendLog(`result=recovery-cooldown issues=${issues.length} ageMin=${age}`);
+    appendLog(
+      `result=recovery-cooldown issues=${issues.length} ageMin=${age} retryIn=${retryInMin}`,
+    );
   }
 
   const rpcDownNow =
@@ -1073,9 +1130,10 @@ async function main() {
 
   const sendMail =
     (rpcDownNow && shouldRpcAlert(state)) ||
-    shouldAlert(state) ||
     (recovery && !recovery.ok && !recovery.skipped) ||
-    (recovery?.ok && !recovery?.skipped);
+    (recovery?.ok && !recovery?.skipped) ||
+    (shouldAlert(state) &&
+      !(doRestart && seedStopped && rpcUp && !recovery && retryInMin > 0));
 
   if (!sendMail) {
     console.log(
@@ -1100,7 +1158,13 @@ async function main() {
   await transporter.verify();
   console.log('SMTP OK');
 
-  const info = await sendAlert(transporter, { issues, recovery });
+  const info = await sendAlert(transporter, {
+    issues,
+    recovery,
+    rpcHealth,
+    autoRestart: doRestart,
+    retryInMin,
+  });
   console.log(
     `Alert sent → ${ALERT_TO.join(', ')}  messageId=${info.messageId || 'n/a'}`,
   );
@@ -1114,8 +1178,33 @@ async function main() {
   saveState(state);
 }
 
-main().catch((err) => {
-  console.error(err?.message || err);
-  appendLog(`result=error ${err?.message || err}`);
-  process.exit(1);
-});
+async function runLoop() {
+  console.log(
+    `Loop mode — re-check every ${RPC_RETRY_MIN} min (Ctrl+C to stop).`,
+  );
+  appendLog(`loop start interval=${RPC_RETRY_MIN}m`);
+  while (true) {
+    try {
+      await main();
+    } catch (err) {
+      console.error(err?.message || err);
+      appendLog(`result=error ${err?.message || err}`);
+    }
+    console.log(`Next check in ${RPC_RETRY_MIN} min…`);
+    await sleep(RPC_RETRY_MIN * 60_000);
+  }
+}
+
+if (LOOP) {
+  runLoop().catch((err) => {
+    console.error(err?.message || err);
+    appendLog(`result=loop-fatal ${err?.message || err}`);
+    process.exit(1);
+  });
+} else {
+  main().catch((err) => {
+    console.error(err?.message || err);
+    appendLog(`result=error ${err?.message || err}`);
+    process.exit(1);
+  });
+}
