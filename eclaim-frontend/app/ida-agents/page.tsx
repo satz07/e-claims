@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Button } from "@/components/ui/button"
 import { eclaimApiHeaders } from "@/lib/eclaim-api"
@@ -8,127 +8,135 @@ import { eclaimApiHeaders } from "@/lib/eclaim-api"
 const base = () =>
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001"
 
-type LastResult = {
-  action: string
-  ok: boolean
-  data?: unknown
-  error?: string
+type EntityType = "citizen" | "clinician" | "insurer" | "provider" | ""
+
+type EntityAgentRow = {
+  entityType?: string | null
+  entityId?: string | null
+  name?: string
+  did?: string
+  agentDid?: string
+  operatorDid?: string
+  labels?: Record<string, string>
+  autonomyLevel?: string | number
+  trustScore?: number
+  createdAt?: string | null
+  registerTxHash?: string | null
+  registerBlockNumber?: number | null
+  ibctSigningKeyHex?: string
 }
 
 export default function IdaAgentsPage() {
-  const [name, setName] = useState("E-claims Agent")
-  const [operatorDid, setOperatorDid] = useState("")
-  const [agentDid, setAgentDid] = useState("")
-  const [busy, setBusy] = useState<string | null>(null)
-  const [last, setLast] = useState<LastResult | null>(null)
   const [config, setConfig] = useState<Record<string, unknown> | null>(null)
-  const [agents, setAgents] = useState<
-    Array<{
-      name?: string
-      did?: string
-      operatorDid?: string
-      trustScore?: number
-      autonomyLevel?: string | number
-    }>
-  >([])
+  const [agents, setAgents] = useState<EntityAgentRow[]>([])
+  const [entityFilter, setEntityFilter] = useState<EntityType>("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedDid, setExpandedDid] = useState<string | null>(null)
 
   const loadConfig = useCallback(async () => {
     try {
       const res = await fetch(`${base()}/api/public/ida-agents/config`)
-      const data = await res.json()
-      setConfig(data)
-    } catch (e: any) {
-      setConfig({ error: e?.message || String(e) })
+      setConfig(await res.json())
+    } catch (e: unknown) {
+      setConfig({
+        error: e instanceof Error ? e.message : String(e),
+      })
     }
   }, [])
+
+  const loadAgents = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const q = entityFilter ? `?entityType=${entityFilter}` : ""
+      const [idaRes, localRes] = await Promise.all([
+        fetch(`${base()}/api/public/ida-agents/list${q}`, {
+          headers: eclaimApiHeaders(),
+        }),
+        fetch(`${base()}/api/public/ida-agents/entities${q}`, {
+          headers: eclaimApiHeaders(),
+        }),
+      ])
+      const idaData = await idaRes.json()
+      const localData = await localRes.json()
+      if (!idaRes.ok && !localRes.ok) {
+        throw new Error(idaData?.message || localData?.message || "List failed")
+      }
+
+      const byDid = new Map<string, EntityAgentRow>()
+      for (const row of (localData.items as EntityAgentRow[]) || []) {
+        const did = row.agentDid || row.did
+        if (!did) continue
+        byDid.set(did, {
+          entityType: row.entityType,
+          entityId: row.entityId,
+          name: row.name,
+          did,
+          operatorDid: row.operatorDid,
+          labels: row.labels,
+          autonomyLevel: row.autonomyLevel,
+          trustScore: row.trustScore,
+          createdAt: row.createdAt,
+          registerTxHash: row.registerTxHash,
+          registerBlockNumber: row.registerBlockNumber,
+          ibctSigningKeyHex: row.ibctSigningKeyHex,
+        })
+      }
+      for (const row of (idaData.items as EntityAgentRow[]) || []) {
+        const did = row.did || ""
+        if (!did) continue
+        const existing = byDid.get(did)
+        byDid.set(did, {
+          ...row,
+          ...existing,
+          entityType: existing?.entityType ?? row.entityType ?? row.labels?.entityType,
+          entityId: existing?.entityId ?? row.entityId ?? row.labels?.entityId,
+          createdAt: existing?.createdAt ?? row.createdAt,
+          registerTxHash: existing?.registerTxHash ?? row.registerTxHash,
+        })
+      }
+
+      const merged = Array.from(byDid.values()).sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        return tb - ta
+      })
+      setAgents(merged)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "List failed")
+      setAgents([])
+    } finally {
+      setBusy(false)
+    }
+  }, [entityFilter])
 
   useEffect(() => {
     loadConfig()
   }, [loadConfig])
 
-  async function call(
-    action: string,
-    path: string,
-    init?: RequestInit,
-  ): Promise<any> {
-    setBusy(action)
-    setLast(null)
-    try {
-      const res = await fetch(`${base()}${path}`, {
-        ...init,
-        headers: eclaimApiHeaders(
-          (init?.headers as Record<string, string>) || {},
-        ),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const msg =
-          data?.message ||
-          data?.error ||
-          (typeof data === "string" ? data : JSON.stringify(data)) ||
-          `HTTP ${res.status}`
-        setLast({ action, ok: false, error: Array.isArray(msg) ? msg.join(", ") : String(msg), data })
-        return null
-      }
-      setLast({ action, ok: true, data })
-      return data
-    } catch (e: any) {
-      setLast({ action, ok: false, error: e?.message || String(e) })
-      return null
-    } finally {
-      setBusy(null)
-    }
-  }
+  useEffect(() => {
+    loadAgents()
+  }, [loadAgents])
 
-  async function onProvision() {
-    const data = await call("provision", "/api/public/ida-agents/provision", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        operatorDid: operatorDid || undefined,
-        platform: "eclaims",
-        labels: { app: "eclaims" },
-      }),
-    })
-    if (!data) return
-    if (data.operatorDid) setOperatorDid(data.operatorDid)
-    if (data.agentDid) setAgentDid(data.agentDid)
-  }
-
-  async function onRegister() {
-    if (!operatorDid.trim()) {
-      setLast({
-        action: "register",
-        ok: false,
-        error: "operatorDid required — provision first or paste one",
-      })
-      return
-    }
-    const data = await call("register", "/api/public/ida-agents/register", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        operatorDid: operatorDid.trim(),
-        agentDid: agentDid.trim() || undefined,
-      }),
-    })
-    if (data?.agentDid) setAgentDid(data.agentDid)
-  }
-
-  async function onList() {
-    const data = await call("list", "/api/public/ida-agents/list?limit=50")
-    if (data?.items) setAgents(data.items)
-  }
+  const filterBtn = (value: EntityType, label: string) => (
+    <Button
+      size="sm"
+      variant={entityFilter === value ? "default" : "outline"}
+      onClick={() => setEntityFilter(value)}
+    >
+      {label}
+    </Button>
+  )
 
   return (
     <AppShell showWallet={false}>
-      <div className="max-w-3xl space-y-6">
+      <div className="max-w-6xl space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">IDA Agents</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Entity IDA Agents</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Provision via IDA API, register on-chain with{" "}
-            <strong>backend wallet signing</strong> (no MetaMask), and list
-            agents — same SDK flows as the playground.
+            Agents created when you <strong>Register on Chain</strong> for citizen,
+            clinician, insurer, or provider. All agents use the shared operator DID.
           </p>
         </div>
 
@@ -139,124 +147,111 @@ export default function IdaAgentsPage() {
               Chain: {String(config.chainId ?? "—")} · signer:{" "}
               {String(config.signerAddress ?? "—")}
             </div>
+            <div>
+              Operator DID: {String(config.operatorDid ?? "—")}
+            </div>
           </div>
         )}
 
-        <div className="space-y-3 rounded-lg border p-4">
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Agent name</span>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Operator DID</span>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm font-mono"
-              placeholder="auto-minted on Provision if empty"
-              value={operatorDid}
-              onChange={(e) => setOperatorDid(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Agent DID</span>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm font-mono"
-              placeholder="filled after Provision / Register"
-              value={agentDid}
-              onChange={(e) => setAgentDid(e.target.value)}
-            />
-          </label>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button
-              size="sm"
-              disabled={!!busy}
-              onClick={onProvision}
-            >
-              {busy === "provision" ? "Provisioning…" : "Provision agent"}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!!busy}
-              onClick={onRegister}
-            >
-              {busy === "register" ? "Registering…" : "Register agent"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!!busy}
-              onClick={onList}
-            >
-              {busy === "list" ? "Loading…" : "List agents"}
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {filterBtn("", "All")}
+          {filterBtn("citizen", "Citizen")}
+          {filterBtn("clinician", "Clinician")}
+          {filterBtn("insurer", "Insurer")}
+          {filterBtn("provider", "Provider")}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={loadAgents}
+          >
+            {busy ? "Loading…" : "Refresh"}
+          </Button>
         </div>
 
-        {(operatorDid || agentDid) && (
-          <div className="rounded-lg border p-4 space-y-2 text-sm">
-            <div className="font-medium">Current IDs</div>
-            <div>
-              <span className="text-muted-foreground">Operator DID: </span>
-              <code className="break-all text-xs">{operatorDid || "—"}</code>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Agent DID: </span>
-              <code className="break-all text-xs">{agentDid || "—"}</code>
-            </div>
-          </div>
-        )}
+        {error && <p className="text-red-500 text-sm">{error}</p>}
 
-        {last && (
-          <div
-            className={`rounded-lg border p-4 text-sm ${
-              last.ok ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
-            }`}
-          >
-            <div className="font-medium mb-2">
-              {last.action} — {last.ok ? "OK" : "Error"}
-            </div>
-            {last.error && (
-              <p className="text-red-700 mb-2">{last.error}</p>
-            )}
-            {last.data != null && (
-              <pre className="text-xs overflow-auto max-h-80 whitespace-pre-wrap">
-                {JSON.stringify(last.data, null, 2)}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {agents.length > 0 && (
-          <div className="rounded-lg border p-4">
-            <div className="font-medium mb-3 text-sm">
-              Agents ({agents.length})
-            </div>
-            <ul className="space-y-3 text-sm">
-              {agents.map((a, i) => (
-                <li key={a.did || i} className="border-b pb-2 last:border-0">
-                  <div className="font-medium">{a.name || "(unnamed)"}</div>
-                  <div className="text-xs font-mono break-all text-muted-foreground">
-                    {a.did}
-                  </div>
-                  {a.operatorDid && (
-                    <div className="text-xs text-muted-foreground">
-                      operator: {a.operatorDid}
-                    </div>
-                  )}
-                  <div className="text-xs text-muted-foreground">
-                    trust {a.trustScore ?? "—"} · autonomy{" "}
-                    {a.autonomyLevel ?? "—"}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <div className="overflow-x-auto border rounded-lg">
+          <table className="min-w-full text-sm">
+            <thead className="bg-muted">
+              <tr>
+                <th className="px-3 py-2 text-left">Entity</th>
+                <th className="px-3 py-2 text-left">Entity ID</th>
+                <th className="px-3 py-2 text-left">Agent name</th>
+                <th className="px-3 py-2 text-left">Agent DID</th>
+                <th className="px-3 py-2 text-left">Operator DID</th>
+                <th className="px-3 py-2 text-left">Trust</th>
+                <th className="px-3 py-2 text-left">Autonomy</th>
+                <th className="px-3 py-2 text-left">Created</th>
+                <th className="px-3 py-2 text-left"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {busy && agents.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-6 text-center text-muted-foreground">
+                    Loading…
+                  </td>
+                </tr>
+              ) : agents.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-6 text-center text-muted-foreground">
+                    No agents yet. Register an entity on its registry page to create one.
+                  </td>
+                </tr>
+              ) : (
+                agents.map((a) => {
+                  const did = a.did || a.agentDid || ""
+                  const open = expandedDid === did
+                  return (
+                    <Fragment key={did}>
+                      <tr className="border-t align-top">
+                        <td className="px-3 py-2 capitalize">
+                          {a.entityType || a.labels?.entityType || "—"}
+                        </td>
+                        <td className="px-3 py-2 font-medium break-all">
+                          {a.entityId || a.labels?.entityId || "—"}
+                        </td>
+                        <td className="px-3 py-2">{a.name || "—"}</td>
+                        <td className="px-3 py-2 font-mono text-xs break-all max-w-xs">
+                          {did || "—"}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs break-all max-w-xs text-muted-foreground">
+                          {a.operatorDid || "—"}
+                        </td>
+                        <td className="px-3 py-2">{a.trustScore ?? "—"}</td>
+                        <td className="px-3 py-2">{a.autonomyLevel ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                          {a.createdAt
+                            ? new Date(a.createdAt).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setExpandedDid(open ? null : did)}
+                          >
+                            {open ? "Hide" : "Details"}
+                          </Button>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="border-t bg-muted/20">
+                          <td colSpan={9} className="px-3 py-3">
+                            <pre className="text-xs overflow-auto max-h-64 whitespace-pre-wrap">
+                              {JSON.stringify(a, null, 2)}
+                            </pre>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </AppShell>
   )

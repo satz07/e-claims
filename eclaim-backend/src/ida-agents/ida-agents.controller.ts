@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -66,10 +67,29 @@ export class IdaAgentsController {
     return this.service.registerAgent(body);
   }
 
+  /** Provision via IDA API + on-chain registerAgent in one call. */
+  @Post('provision-and-register')
+  @HttpCode(200)
+  provisionAndRegister(
+    @Body()
+    body: {
+      name?: string;
+      entityType?: 'citizen' | 'clinician' | 'insurer' | 'provider';
+      entityId?: string;
+      operatorDid?: string;
+      platform?: string;
+      autonomyLevel?: number;
+      labels?: Record<string, string>;
+    },
+  ) {
+    return this.service.provisionAndRegister(body || {});
+  }
+
   @Get('list')
   list(
     @Query('limit') limit?: string,
     @Query('labels') labelsJson?: string,
+    @Query('entityType') entityType?: string,
   ) {
     let labels: Record<string, string> | undefined;
     if (labelsJson) {
@@ -79,9 +99,41 @@ export class IdaAgentsController {
         labels = undefined;
       }
     }
+    const et = ['citizen', 'clinician', 'insurer', 'provider'].includes(
+      entityType || '',
+    )
+      ? (entityType as 'citizen' | 'clinician' | 'insurer' | 'provider')
+      : undefined;
     return this.service.listAgents({
-      limit: limit ? Number(limit) : 50,
+      limit: limit ? Number(limit) : 200,
       labels,
+      entityType: et,
     });
+  }
+
+  @Get('entities')
+  listEntities(@Query('entityType') entityType?: string) {
+    const et = ['citizen', 'clinician', 'insurer', 'provider'].includes(
+      entityType || '',
+    )
+      ? (entityType as 'citizen' | 'clinician' | 'insurer' | 'provider')
+      : undefined;
+    return this.service.listEntityAgents(et);
+  }
+
+  @Get('entities/:entityType/:entityId')
+  getEntity(
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+  ) {
+    const et = ['citizen', 'clinician', 'insurer', 'provider'].includes(
+      entityType,
+    )
+      ? (entityType as 'citizen' | 'clinician' | 'insurer' | 'provider')
+      : null;
+    if (!et) {
+      return { found: false, entityType, entityId };
+    }
+    return this.service.getEntityAgent(et, entityId);
   }
 }

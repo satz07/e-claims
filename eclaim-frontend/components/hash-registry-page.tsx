@@ -220,8 +220,38 @@ export function HashRegistryPage({ config }: { config: RegistryConfig }) {
         /* non-fatal */
       }
 
+      let agentNote = ""
+      try {
+        const agentRes = await fetch(
+          `${base()}/api/public/ida-agents/provision-and-register`,
+          {
+            method: "POST",
+            headers: eclaimApiHeaders(),
+            body: JSON.stringify({
+              entityType: config.kind,
+              entityId: id,
+              name: `${config.kind} ${id}`,
+            }),
+          },
+        )
+        const agentData = await agentRes.json().catch(() => ({}))
+        if (agentRes.ok && agentData?.agentDid) {
+          agentNote = ` IDA agent ${agentData.agentDid} provisioned and registered.`
+        } else {
+          const msg =
+            agentData?.message ||
+            agentData?.error ||
+            (typeof agentData === "string" ? agentData : "")
+          agentNote = msg
+            ? ` Registry OK; IDA agent step failed: ${String(msg)}`
+            : " Registry OK; IDA agent step failed."
+        }
+      } catch {
+        agentNote = " Registry OK; IDA agent step failed (network error)."
+      }
+
       setSuccess({
-        message: `Registered ${id} (signed with your wallet).`,
+        message: `Registered ${id} (signed with your wallet).${agentNote}`,
         txHash,
       })
       if (tab === "list") fetchList(listPage)
