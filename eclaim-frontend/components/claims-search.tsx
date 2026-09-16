@@ -8,7 +8,7 @@ import { eclaimApiHeaders } from "@/lib/eclaim-api"
 export function ClaimsSearch() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(50)
   const [totalPages, setTotalPages] = useState(0)
   const [totalElements, setTotalElements] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -73,7 +73,7 @@ export function ClaimsSearch() {
   }
 
   const handlePageSizeChange = (size: number) => {
-    const next = Math.min(100, Math.max(1, size || 20))
+    const next = Math.min(200, Math.max(1, size || 50))
     setPageSize(next)
     if (searchMode === "list") {
       loadClaims(0, next)

@@ -1,0 +1,27 @@
+{
+  "name": "agentsight-quickstart",
+  "version": "1.0.0",
+  "description": "AgentSight + IDA SDK quickstart \u2014 mint DIDs, provision agents, record trust signals",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "01:mint-did": "tsx src/01-mint-did.ts",
+    "02:provision-agent": "tsx src/02-provision-agent.ts",
+    "03:trust-signals": "tsx src/03-trust-signals.ts",
+    "04:webhooks": "tsx src/04-webhooks.ts",
+    "05:resolve-did": "tsx src/05-resolve-did.ts",
+    "06:revocation": "tsx src/06-revocation.ts",
+    "07:self-sovereign": "tsx src/07-self-sovereign.ts",
+    "all": "tsx src/run-all.ts",
+    "08:multichain": "tsx src/08-multichain.ts"
+  },
+  "dependencies": {
+    "@myida/sdk": "^1.5.0",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

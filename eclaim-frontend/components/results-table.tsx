@@ -116,7 +116,7 @@ function PaginationControls({
           <Input
             type="number"
             min={1}
-            max={100}
+            max={200}
             value={sizeDraft}
             onChange={(e) => setSizeDraft(e.target.value)}
             onBlur={applySize}

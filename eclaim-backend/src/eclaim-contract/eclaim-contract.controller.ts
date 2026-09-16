@@ -41,7 +41,7 @@ export class EclaimContractController {
   @Get()
   async getAllClaims(
     @Query('page') page = '0',
-    @Query('size') size = '20',
+    @Query('size') size = '50',
     @Query('recordUse') recordUse?: 'claim' | 'preauthorization',
   ) {
     return this.service.getAllClaims(Number(page), Number(size), recordUse);

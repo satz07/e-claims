@@ -98,6 +98,13 @@ export function Sidebar() {
           >
             <span className="font-medium">Provider registry</span>
           </button>
+
+          <button
+            className={navItemClass("/ida-agents")}
+            onClick={() => navigate("/ida-agents")}
+          >
+            <span className="font-medium">IDA Agents</span>
+          </button>
         </nav>
       </aside>
 

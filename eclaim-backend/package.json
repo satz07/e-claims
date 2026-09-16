@@ -29,7 +29,8 @@
     "check:balances": "node scripts/check-wallet-balances.mjs",
     "check:seed-workers": "node scripts/check-seed-workers.mjs",
     "analytics:eclaims": "node scripts/generate-eclaims-analytics.mjs",
-    "dashboard:ops": "node operations-dashboard/server.mjs"
+    "dashboard:ops": "node operations-dashboard/server.mjs",
+    "dashboard:ppt": "node operations-dashboard/scripts/generate-presentation.mjs"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.29.1",
@@ -37,6 +38,7 @@
     "@dfns/sdk-keysigner": "^0.7.15",
     "@golevelup/nestjs-stripe": "^0.6.5",
     "@hapi/joi": "^17.1.1",
+    "@myida/sdk": "^1.5.0",
     "@nestjs/axios": "^4.0.0",
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/common": "^10.0.0",
@@ -122,7 +124,6 @@
       "git add"
     ]
   },
-  
   "jest": {
     "moduleFileExtensions": [
       "js",

@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ethers } from 'ethers';
 import * as ABI from './CLAIM_REGISTRY.json';
@@ -23,6 +24,7 @@ import { extendChainWriteLock, withChainWriteLock } from './chain-write-lock';
 import { RegistryEnsureService } from './registry-ensure.service';
 
 const META_FILE = path.join(process.cwd(), 'claim-meta.json');
+const CLAIM_NUMBERS_FILE = path.join(process.cwd(), 'claim-numbers-index.json');
 
 const ACTIVE_CHAIN = getActiveChain();
 const CONTRACT_ADDRESS =
@@ -124,7 +126,7 @@ export interface ClaimMeta {
 }
 
 @Injectable()
-export class EclaimContractService {
+export class EclaimContractService implements OnModuleInit {
   private provider: ethers.JsonRpcProvider;
   private contract: ethers.Contract;
   /** Legacy (V1) contract — read-only for old data. Null when not configured. */
@@ -135,8 +137,13 @@ export class EclaimContractService {
   /** Newest-first unique claim numbers from ClaimUpserted; avoids re-scan on every list page. */
   private claimNumbersCache: number[] | null = null;
   private claimNumbersCacheAtMs = 0;
-  /** Full V1+V3 log scan is slow; keep list totals warm for several minutes. */
-  private static readonly CLAIM_NUMBERS_TTL_MS = 2 * 60_000;
+  /** Last chain block included in claimNumbersCache (incremental eth_getLogs). */
+  private claimIndexLastBlock = 0;
+  private claimIndexSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Coalesce concurrent rebuilds (warm + first HTTP request). */
+  private claimIndexInflight: Promise<number[]> | null = null;
+  /** Keep list totals warm; disk + incremental scan make refreshes cheap. */
+  private static readonly CLAIM_NUMBERS_TTL_MS = 15 * 60_000;
   /** Apeiro RPC rejects large eth_getLogs ranges — keep chunks small. */
   private static readonly LOG_CHUNK_BLOCKS = 1_500;
   private static readonly LOG_CHUNK_CONCURRENCY = 8;
@@ -152,6 +159,18 @@ export class EclaimContractService {
       ? new ethers.Contract(LEGACY_CONTRACT_ADDRESS, ABI_V1.abi, this.provider)
       : null;
     this.loadMetaFromDisk();
+    this.loadClaimNumbersFromDisk();
+  }
+
+  onModuleInit() {
+    // Warm index in background so the first Claims page is not a full V1+V3 scan.
+    setImmediate(() => {
+      this.getOrderedClaimNumbers().catch((err) =>
+        console.warn(
+          `[eclaim] claim index warm failed: ${err?.message || err}`,
+        ),
+      );
+    });
   }
 
   private loadMetaFromDisk() {
@@ -189,6 +208,58 @@ export class EclaimContractService {
       for (const [k, v] of this.metaCache) obj[String(k)] = v;
       fs.writeFileSync(META_FILE, JSON.stringify(obj, null, 2));
     } catch { /* ignore write errors */ }
+  }
+
+  private loadClaimNumbersFromDisk() {
+    try {
+      if (!fs.existsSync(CLAIM_NUMBERS_FILE)) return;
+      const raw = JSON.parse(fs.readFileSync(CLAIM_NUMBERS_FILE, 'utf8'));
+      const ordered = Array.isArray(raw?.ordered)
+        ? raw.ordered.map(Number).filter((n: number) => Number.isFinite(n) && n > 0)
+        : [];
+      const lastBlock = Number(raw?.lastScannedBlock ?? 0);
+      if (!ordered.length) return;
+      this.claimNumbersCache = ordered;
+      this.claimIndexLastBlock = Number.isFinite(lastBlock) ? lastBlock : 0;
+      this.claimNumbersCacheAtMs = Date.now();
+      let max = 0n;
+      for (const n of ordered) {
+        const bn = BigInt(n);
+        if (bn > max) max = bn;
+      }
+      this.lastClaimNumberCache = max;
+      console.log(
+        `[eclaim] ClaimUpserted index loaded from disk: ${ordered.length} claim(s), lastBlock=${this.claimIndexLastBlock}`,
+      );
+    } catch {
+      /* ignore corrupt file */
+    }
+  }
+
+  private saveClaimNumbersToDiskNow() {
+    if (!this.claimNumbersCache) return;
+    try {
+      fs.writeFileSync(
+        CLAIM_NUMBERS_FILE,
+        JSON.stringify({
+          lastScannedBlock: this.claimIndexLastBlock,
+          updatedAt: new Date().toISOString(),
+          count: this.claimNumbersCache.length,
+          ordered: this.claimNumbersCache,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Debounce disk writes during bulk seed. */
+  private scheduleSaveClaimNumbersToDisk() {
+    if (this.claimIndexSaveTimer) clearTimeout(this.claimIndexSaveTimer);
+    this.claimIndexSaveTimer = setTimeout(() => {
+      this.claimIndexSaveTimer = null;
+      this.saveClaimNumbersToDiskNow();
+    }, 2000);
   }
 
   cacheClaimMeta(claimNumber: number, meta: ClaimMeta) {
@@ -444,15 +515,71 @@ export class EclaimContractService {
     return next;
   }
 
-  /** Newest-first unique claim numbers; cached with short TTL, updated on submit. */
+  /** Newest-first unique claim numbers; disk + incremental eth_getLogs (not full rescan every TTL). */
   private async getOrderedClaimNumbers(force = false): Promise<number[]> {
     const fresh =
       this.claimNumbersCache &&
       !force &&
-      Date.now() - this.claimNumbersCacheAtMs < EclaimContractService.CLAIM_NUMBERS_TTL_MS;
+      Date.now() - this.claimNumbersCacheAtMs <
+        EclaimContractService.CLAIM_NUMBERS_TTL_MS;
     if (fresh) return this.claimNumbersCache!;
 
-    const events = await this.queryClaimUpsertedEvents();
+    if (this.claimIndexInflight && !force) {
+      return this.claimIndexInflight;
+    }
+
+    this.claimIndexInflight = this.refreshOrderedClaimNumbers(force).finally(
+      () => {
+        this.claimIndexInflight = null;
+      },
+    );
+    return this.claimIndexInflight;
+  }
+
+  private async refreshOrderedClaimNumbers(force = false): Promise<number[]> {
+    if (!this.claimNumbersCache) {
+      this.loadClaimNumbersFromDisk();
+    }
+
+    // Re-check TTL after possible disk load / wait
+    const fresh =
+      this.claimNumbersCache &&
+      !force &&
+      Date.now() - this.claimNumbersCacheAtMs <
+        EclaimContractService.CLAIM_NUMBERS_TTL_MS &&
+      this.claimIndexLastBlock > 0;
+    if (fresh) return this.claimNumbersCache!;
+
+    const latestBlock = await this.provider.getBlockNumber();
+
+    // Incremental: only scan blocks after last indexed tip.
+    if (
+      this.claimNumbersCache &&
+      this.claimIndexLastBlock > 0 &&
+      !force
+    ) {
+      const from = this.claimIndexLastBlock + 1;
+      if (from <= latestBlock) {
+        const newEvents = await this.queryClaimUpsertedEventsRange(
+          from,
+          latestBlock,
+        );
+        // Chronological order → rememberClaimNumber leaves newest at front.
+        for (const e of newEvents) {
+          this.rememberClaimNumber(Number(e.args.claimNumber), false);
+        }
+        console.log(
+          `[eclaim] ClaimUpserted index incremental: +${newEvents.length} event(s) blocks ${from}→${latestBlock}, total=${this.claimNumbersCache.length}`,
+        );
+      }
+      this.claimIndexLastBlock = latestBlock;
+      this.claimNumbersCacheAtMs = Date.now();
+      this.saveClaimNumbersToDiskNow();
+      return this.claimNumbersCache!;
+    }
+
+    // Full rebuild (cold start / force).
+    const events = await this.queryClaimUpsertedEventsRange(0, latestBlock);
     const seen = new Set<number>();
     const ordered: number[] = [];
     for (const e of events) {
@@ -464,6 +591,7 @@ export class EclaimContractService {
     }
     ordered.reverse();
     this.claimNumbersCache = ordered;
+    this.claimIndexLastBlock = latestBlock;
     this.claimNumbersCacheAtMs = Date.now();
 
     let max = this.lastClaimNumberCache ?? 0n;
@@ -474,25 +602,35 @@ export class EclaimContractService {
     if (ordered.length) this.lastClaimNumberCache = max;
 
     console.log(
-      `[eclaim] ClaimUpserted index rebuilt: ${ordered.length} unique claimNumber(s) (V3+V1)`,
+      `[eclaim] ClaimUpserted index rebuilt: ${ordered.length} unique claimNumber(s) (V3+V1) through block ${latestBlock}`,
     );
+    this.saveClaimNumbersToDiskNow();
 
     return ordered;
   }
 
   /** Keep list cache in sync when this process anchors a new claim. */
-  private rememberClaimNumber(claimNumber: number) {
+  private rememberClaimNumber(claimNumber: number, persist = true) {
     const n = Number(claimNumber);
     if (!Number.isFinite(n) || n <= 0) return;
     const bn = BigInt(n);
     if (this.lastClaimNumberCache == null || bn > this.lastClaimNumberCache) {
       this.lastClaimNumberCache = bn;
     }
-    if (!this.claimNumbersCache) return;
-    if (this.claimNumbersCache[0] === n) return;
+    if (!this.claimNumbersCache) {
+      this.claimNumbersCache = [n];
+      this.claimNumbersCacheAtMs = Date.now();
+      if (persist) this.scheduleSaveClaimNumbersToDisk();
+      return;
+    }
+    if (this.claimNumbersCache[0] === n) {
+      this.claimNumbersCacheAtMs = Date.now();
+      return;
+    }
     this.claimNumbersCache = this.claimNumbersCache.filter((x) => x !== n);
     this.claimNumbersCache.unshift(n);
     this.claimNumbersCacheAtMs = Date.now();
+    if (persist) this.scheduleSaveClaimNumbersToDisk();
   }
 
   /** List candidates using local meta only (no RPC). Unknown / fhir-looking kept for page fetch. */
@@ -947,31 +1085,48 @@ export class EclaimContractService {
     return claimNumber !== null;
   }
 
-  private async queryEventsFrom(contract: ethers.Contract) {
-    const latestBlock = await this.provider.getBlockNumber();
-    // Scan from genesis — Apeiro is still small; large lookback windows fail on this RPC.
+  private async queryEventsFrom(
+    contract: ethers.Contract,
+    startBlock = 0,
+    endBlock?: number,
+  ) {
+    const latestBlock =
+      endBlock ?? (await this.provider.getBlockNumber());
+    const from = Math.max(0, startBlock);
+    if (from > latestBlock) return [];
     return this.queryFilterInChunks(
       contract,
       contract.filters.ClaimUpserted(),
-      0,
+      from,
       latestBlock,
     );
   }
 
-  /** Query ClaimUpserted events from both the current (V3) and legacy (V1) contracts. */
-  private async queryClaimUpsertedEvents() {
-    const allEvents = await this.queryEventsFrom(this.contract);
+  /** Query ClaimUpserted events from both contracts over [fromBlock, toBlock]. */
+  private async queryClaimUpsertedEventsRange(
+    fromBlock: number,
+    toBlock: number,
+  ) {
+    const allEvents = await this.queryEventsFrom(
+      this.contract,
+      fromBlock,
+      toBlock,
+    );
     if (this.legacyContract) {
-      const legacyEvents = await this.queryEventsFrom(this.legacyContract);
+      const legacyEvents = await this.queryEventsFrom(
+        this.legacyContract,
+        fromBlock,
+        toBlock,
+      );
       allEvents.push(...legacyEvents);
     }
     return allEvents;
   }
 
-  async getAllClaims(page = 0, size = 20, recordUse?: RecordUse) {
+  async getAllClaims(page = 0, size = 50, recordUse?: RecordUse) {
     try {
       const pageNo = Math.max(0, Number(page) || 0);
-      const pageSize = Math.min(100, Math.max(1, Number(size) || 20));
+      const pageSize = Math.min(200, Math.max(1, Number(size) || 50));
 
       const ordered = await this.getOrderedClaimNumbers();
       const candidates = ordered.filter((n) => this.isListCandidate(n, recordUse));

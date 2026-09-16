@@ -31,12 +31,22 @@
  *   SEED_RESTART_HEALTH_URL=http://localhost:8001/api/public/integration/health
  *   SEED_ALERT_CHECK_RPC=true
  *   SEED_ALERT_RPC_URL=https://rpc.apeiro.adifoundation.ai  (falls back to APEIRO_RPC_URL / ECLAIM_RPC_URL)
+ *
+ * Sequential queue (preferred): scripts/seed-worker-queue.json
+ * When active worker range is complete, auto-advances to next pending (F→Z).
  */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync, spawn } from 'child_process';
 import nodemailer from 'nodemailer';
+import {
+  loadQueue,
+  getActiveEntry,
+  advanceAfterComplete,
+  markWorkerStatus,
+  queueSummary,
+} from './seed-worker-queue.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -86,7 +96,10 @@ const RESTART_BACKEND =
   String(process.env.SEED_ALERT_RESTART_BACKEND || 'true').toLowerCase() ===
   'true';
 const PM2_NAME = process.env.SEED_RESTART_PM2_NAME || 'eclaim-backend_v2';
-const RESTART_WORKER = String(process.env.SEED_RESTART_WORKER || 'B').trim();
+/** Active seed worker — prefer seed-worker-queue.json, else SEED_RESTART_WORKER. */
+let RESTART_WORKER = String(process.env.SEED_RESTART_WORKER || 'B').trim();
+let RESTART_FROM_OVERRIDE = null;
+let RESTART_TO_OVERRIDE = null;
 const RESTART_LIMIT = Number(process.env.SEED_RESTART_LIMIT || 10000);
 const SKIP_ENSURE =
   String(process.env.SEED_RESTART_SKIP_ENSURE || 'true').toLowerCase() ===
@@ -360,12 +373,67 @@ async function checkRpcHealth() {
   }
 }
 
+/**
+ * Sync RESTART_WORKER from queue. If current range is done, mark done and
+ * advance to next pending so recovery starts the next worker (not stuck on E).
+ */
+function syncRestartTargetFromQueue() {
+  const q = loadQueue();
+  if (!q) return { usedQueue: false };
+
+  let active = getActiveEntry(q);
+  if (!active) {
+    return { usedQueue: true, finished: true, summary: queueSummary(q) };
+  }
+
+  // Catch up: if progress file shows range complete, advance (may skip several)
+  for (let i = 0; i < 40; i++) {
+    const progress = readProgress(active.id);
+    const to = Number(active.to);
+    if (!isRangeComplete(progress, to)) break;
+    appendLog(
+      `queue: worker ${active.id} complete (cursor #${progress.lastClaimNumber} ≥ ${to}) — advancing`,
+    );
+    const next = advanceAfterComplete(active.id);
+    if (!next) {
+      RESTART_WORKER = active.id;
+      RESTART_FROM_OVERRIDE = active.from;
+      RESTART_TO_OVERRIDE = active.to;
+      return { usedQueue: true, finished: true, summary: queueSummary() };
+    }
+    active = next;
+  }
+
+  RESTART_WORKER = active.id;
+  RESTART_FROM_OVERRIDE = Number(active.from);
+  RESTART_TO_OVERRIDE = Number(active.to);
+  const qLimit = Number(q.limit);
+  if (Number.isFinite(qLimit) && qLimit > 0) {
+    // queue limit overrides env when present
+  }
+  return {
+    usedQueue: true,
+    finished: false,
+    worker: active,
+    summary: queueSummary(),
+    limit: Number.isFinite(qLimit) && qLimit > 0 ? qLimit : RESTART_LIMIT,
+  };
+}
+
 function resolveRestartRange() {
   const progress = readProgress(RESTART_WORKER);
   const from = Number(
-    process.env.SEED_RESTART_FROM || progress?.range?.from || '',
+    RESTART_FROM_OVERRIDE ??
+      process.env.SEED_RESTART_FROM ??
+      progress?.range?.from ??
+      '',
   );
-  const to = Number(process.env.SEED_RESTART_TO || progress?.range?.to || '');
+  const to = Number(
+    RESTART_TO_OVERRIDE ??
+      process.env.SEED_RESTART_TO ??
+      progress?.range?.to ??
+      '',
+  );
   if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0 || to <= 0) {
     return null;
   }
@@ -659,12 +727,23 @@ async function tryRecovery(issues) {
 
   const { from, to, progress } = range;
   if (isRangeComplete(progress, to)) {
+    const next = advanceAfterComplete(RESTART_WORKER);
+    if (next) {
+      RESTART_WORKER = next.id;
+      RESTART_FROM_OVERRIDE = Number(next.from);
+      RESTART_TO_OVERRIDE = Number(next.to);
+      appendLog(
+        `queue advanced ${progress?.range?.worker || '?'} → ${next.id} (${next.from}→${next.to})`,
+      );
+      // Continue recovery for the next worker in the same attempt
+      return tryRecovery(issues);
+    }
     return {
       ok: true,
       skipped: true,
       backend: { skipped: true },
       seed: { skipped: true },
-      reason: `Worker ${RESTART_WORKER} range already complete (cursor #${progress.lastClaimNumber} ≥ ${to})`,
+      reason: `All seed workers in queue are complete (last cursor #${progress.lastClaimNumber} ≥ ${to})`,
     };
   }
 
@@ -768,6 +847,17 @@ async function tryRecovery(issues) {
         pid: child.pid,
         reason: `Import launch failed — check logs/db-seed-runs-${RESTART_WORKER}.log`,
       };
+
+  if (alive) {
+    try {
+      markWorkerStatus(RESTART_WORKER, 'running', {
+        startedAt: new Date().toISOString(),
+        pid: child.pid,
+      });
+    } catch {
+      /* ignore queue write errors */
+    }
+  }
 
   const ok = seed.ok;
   const reason = [
@@ -989,8 +1079,21 @@ async function main() {
   const doRestart = (AUTO_RESTART || FORCE_RESTART) && !NO_RESTART;
   let state = loadState();
 
+  const queueSync = syncRestartTargetFromQueue();
+  if (queueSync.usedQueue) {
+    console.log(`Queue:            ${queueSync.summary}`);
+    if (queueSync.finished) {
+      console.log('OK — all workers in seed-worker-queue.json are done/skipped.');
+      appendLog('result=queue-finished');
+      return;
+    }
+  }
+
   console.log('── DB seed worker check ──');
   console.log(`Check:            worker ${RESTART_WORKER} + seed process`);
+  console.log(
+    `Range:            ${RESTART_FROM_OVERRIDE ?? process.env.SEED_RESTART_FROM ?? '?'} → ${RESTART_TO_OVERRIDE ?? process.env.SEED_RESTART_TO ?? '?'}`,
+  );
   console.log(`Alert to:         ${ALERT_TO.join(', ') || '(none)'}`);
   console.log(`Email cooldown:   ${COOLDOWN_MIN} min`);
   console.log(`Recovery cooldown:${RECOVERY_COOLDOWN_MIN} min`);

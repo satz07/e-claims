@@ -50,6 +50,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { DonationsModule } from './donations/donations.module';
 import { DisbursementsModule } from './disbursements/disbursements.module';
 import { EclaimContractModule } from './eclaim-contract/eclaim-contract.module';
+import { IdaAgentsModule } from './ida-agents/ida-agents.module';
 // import { ScheduleModule } from '@nestjs/schedule';
 // import { CronModule } from './cron/cron.module';
 @Module({
@@ -148,6 +149,7 @@ import { EclaimContractModule } from './eclaim-contract/eclaim-contract.module';
     DonationsModule,
     DisbursementsModule,
     EclaimContractModule,
+    IdaAgentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

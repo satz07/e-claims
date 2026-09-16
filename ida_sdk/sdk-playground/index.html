@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>@myida/sdk Playground</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel-2: #1c232c; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --accent-2: #a371f7;
+      --ok: #3fb950; --warn: #d29922; --err: #f85149; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px; line-height: 1.5;
+    }
+    header {
+      border-bottom: 1px solid var(--border); padding: 16px 24px;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      background: var(--panel); position: sticky; top: 0; z-index: 10;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+    header h1 .tag { color: var(--accent-2); }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .card > h2 {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+      margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel-2);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    input, select {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    input[readonly] { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .row { display: flex; gap: 8px; align-items: flex-end; }
+    .row > div { flex: 1; }
+    button {
+      background: var(--accent); color: #0d1117; border: none; padding: 8px 14px;
+      border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap;
+    }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+    button.ss { background: var(--accent-2); }
+    .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hint { font-size: 11px; color: var(--muted); }
+    .console {
+      grid-column: 1 / -1; background: #010409; border: 1px solid var(--border); border-radius: 10px;
+      font-family: var(--mono); font-size: 12.5px; overflow: hidden;
+    }
+    .console h2 {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+      margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #log { padding: 12px 16px; max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+    .log-entry { padding: 6px 0; border-bottom: 1px solid #161b22; }
+    .log-entry .t { color: var(--muted); font-size: 11px; }
+    .log-entry .op { color: var(--accent); font-weight: 600; }
+    .log-entry.ok .op { color: var(--ok); }
+    .log-entry.err .op { color: var(--err); }
+    .log-entry.chain .op { color: var(--accent-2); }
+    .log-entry pre { margin: 4px 0 0; color: var(--text); font-size: 12px; }
+    .pill { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px; margin-left: 6px; }
+    .pill.api { background: #1f2d3d; color: var(--accent); }
+    .pill.chain { background: #2d1f3d; color: var(--accent-2); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--muted); }
+    .dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+    code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>@myida<span class="tag">/sdk</span> Playground</h1>
+    <span class="badge" id="ver">v—</span>
+    <span class="badge"><span class="dot" id="apidot"></span> API <span id="apistate">checking…</span></span>
+    <span style="flex:1"></span>
+    <span class="hint">Server-mediated <span class="pill api">API</span> · Self-sovereign on-chain <span class="pill chain">CHAIN</span></span>
+  </header>
+
+  <div class="layout">
+    <!-- Connection -->
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="card-body">
+        <div>
+          <label>Network (from SDK chain registry)</label>
+          <select id="networkSel"></select>
+          <div class="hint" style="margin-top:4px">Picking a network fills RPC / chain ID / registry addresses below from <code>@myida/sdk</code>'s built-in CHAINS.</div>
+        </div>
+        <div><label>API URL</label><input id="apiUrl" value="http://localhost:8080" /></div>
+        <div><label>API Key</label><input id="apiKey" value="dev-api-key" /></div>
+        <div>
+          <label>Network preset</label>
+          <select id="chainPreset">
+            <option value="36900">ADI Mainnet — 36900 (home chain)</option>
+            <option value="99991">ADI Testnet — 99991</option>
+            <option value="37001">Apiero — 37001</option>
+            <option value="84532">Base Sepolia — 84532</option>
+            <option value="11155111">Ethereum Sepolia — 11155111</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><label>RPC URL (on-chain)</label><input id="rpcUrl" value="https://rpc.adifoundation.ai/" /></div>
+          <div style="flex:0 0 110px"><label>Chain ID</label><input id="chainId" value="36900" /></div>
+        </div>
+        <div><label>DIDRegistry</label><input id="didRegistry" value="0xa867Be733ab382a3491bC2A3Bff95F98eEb403b1" /></div>
+        <div><label>AgentTrustRegistry</label><input id="agentRegistry" value="0xAb8066df5D28a924a079Fc47Fa7b4ad338FA160B" /></div>
+        <button id="connect">Connect</button>
+      </div>
+    </div>
+
+    <!-- Wallet (self-sovereign) -->
+    <div class="card">
+      <h2>Self-Sovereign Wallet <span class="pill chain">CHAIN</span></h2>
+      <div class="card-body">
+        <!-- MetaMask -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button id="connectMM">Connect MetaMask</button>
+          <span class="badge"><span class="dot" id="mmdot"></span> <span id="mmstate">not connected</span></span>
+        </div>
+        <div><label>MetaMask account</label><input id="mmAddr" readonly placeholder="—" /></div>
+        <div class="hint" id="mmChainHint"></div>
+
+        <div style="border-top:1px solid var(--border);margin:4px 0"></div>
+
+        <!-- Raw key fallback -->
+        <div class="hint">Or use a raw in-page key (no extension). <b>(signer)</b> ops prefer MetaMask when connected, else this key.</div>
+        <div><label>Private Key</label><input id="pk" placeholder="0x… (paste a funded key, or generate)" /></div>
+        <div><label>Address</label><input id="addr" readonly placeholder="—" /></div>
+        <div class="btn-grid">
+          <button class="secondary" id="genWallet">Generate random</button>
+          <button class="secondary" id="loadWallet">Load key</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DID lookup by wallet -->
+    <div class="card">
+      <h2>Look up DID by Wallet <span class="pill chain">CHAIN</span></h2>
+      <div class="card-body">
+        <div class="hint">Reads DIDRegistry directly from the chain — no API, no gas. For a wallet-based DID, the identifier is <code>did:adi:&lt;address&gt;</code>; this tells you whether it actually exists on-chain, who owns it, and if it's active.</div>
+        <div class="row">
+          <div><label>Wallet address or DID</label><input id="lookupInput" placeholder="0x… or did:adi:…" /></div>
+          <div style="flex:0 0 auto"><button data-op="lookupDid">Look up</button></div>
+        </div>
+        <div class="btn-grid">
+          <button class="secondary" id="useMyWallet">Use my raw wallet</button>
+          <button class="secondary" id="useMMWallet">Use MetaMask wallet</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DID ops -->
+    <div class="card">
+      <h2>DID Operations</h2>
+      <div class="card-body">
+        <div><label>DID (for resolve/update/deactivate)</label><input id="did" placeholder="did:adi:…" /></div>
+        <div class="btn-grid">
+          <button data-op="createDidApi">createDID <span></span></button>
+          <button class="ss" data-op="createDidChain">createDID (signer)</button>
+          <button class="secondary" data-op="resolveDid">resolveDID</button>
+          <button class="ss" data-op="deactivateChain">deactivate (signer)</button>
+        </div>
+        <div class="hint">API buttons hit the server; <b>(signer)</b> buttons sign & submit on-chain with your wallet.</div>
+      </div>
+    </div>
+
+    <!-- Agent ops -->
+    <div class="card">
+      <h2>Agent Operations</h2>
+      <div class="card-body">
+        <div><label>Operator DID</label><input id="opDid" placeholder="did:adi:… (use a created DID)" /></div>
+        <div><label>Agent DID (for on-chain register / signals)</label><input id="agentDid" placeholder="did:adi:agent-…" /></div>
+        <div class="row">
+          <div><label>Agent name</label><input id="agentName" placeholder="Playground Agent" /></div>
+          <div style="flex:0 0 90px"><label>Fleet size</label><input id="fleetSize" value="3" /></div>
+        </div>
+        <div>
+          <label>Labels</label>
+          <input id="agentLabels" placeholder="team:finance, env:prod" />
+        </div>
+        <div class="hint">
+          Labels are yours to define — IDA stores the pairs verbatim and never interprets them.
+          <b>Provision fleet</b> mints several agents against the same operator and sponsor;
+          each gets its own DID, because every call generates a fresh key pair.
+        </div>
+        <div class="btn-grid">
+          <button data-op="provisionAgent">provisionAgent</button>
+          <button data-op="provisionFleet">provision fleet</button>
+          <button class="ss" data-op="registerAgentChain">registerAgent (signer)</button>
+          <button data-op="trustApi">trustSignal (API)</button>
+          <button class="ss" data-op="trustChain">trustSignal (signer)</button>
+        </div>
+        <div>
+          <label>Filter by label</label>
+          <input id="labelFilter" placeholder="team:finance, env:prod — blank lists all" />
+        </div>
+        <div class="hint">
+          Every label must match, so each one narrows the result. Listings are scoped to the
+          caller: an agent shows up when its operator is your own subject or a DID you own, so
+          use an API key issued from Settings rather than a shared service key.
+        </div>
+        <div class="btn-grid">
+          <button data-op="listAgents">listAgents</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- Provable sponsorship -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Provable Sponsorship <span class="pill chain">CHAIN</span></h2>
+      <div class="card-body">
+        <div class="hint">
+          Sponsorship is recorded <b>on the agent record</b>, keyed by <b>agent DID</b>, in the AgentTrustRegistry.
+          The <b>sponsor</b> (a human/org, own wallet) calls <code>confirmSponsorship(agentDid, sponsorDid)</code> — the chain
+          records <code>msg.sender</code> as the proven sponsor, so the operator can't forge it. Then anyone asks
+          <code>getSponsor(agentDid)</code> and learns the sponsor, trusting only the chain.
+          <b>Prereq:</b> the agent must already be registered on-chain (use <i>registerAgent (signer)</i> in Agent Operations).
+          See <code>docs/agent-sponsor-registry-change.md</code>.
+        </div>
+
+        <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:12px;color:var(--accent-2);font-weight:600">① SPONSOR — a human / org (their own wallet)</div>
+          <div class="hint">The sponsor can be a <b>separate party</b> (Generate sponsor) OR the <b>same wallet as the operator</b> if the operator vouches for its own agent (paste the operator key → the DID auto-fills). Whichever wallet signs becomes the proven sponsor.</div>
+          <div><label>Sponsor DID (auto-derived from the key below)</label><input id="sponsorDid" readonly placeholder="did:adi:0x… — fills from the key" /></div>
+          <div class="row">
+            <div><label>Sponsor private key (signs confirmSponsorship — needs gas)</label><input id="sponsorPk" placeholder="0x… operator key, or click Generate sponsor" /></div>
+            <div style="flex:0 0 auto"><button class="secondary" id="genSponsor">Generate sponsor</button></div>
+          </div>
+        </div>
+
+        <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:12px;color:var(--accent);font-weight:600">② AGENT — the one being sponsored (by agent DID)</div>
+          <div class="row">
+            <div><label>Agent DID (must be registered on-chain first)</label><input id="ssAgentDid" placeholder="did:adi:… paste a registered agent DID, or Generate" /></div>
+            <div style="flex:0 0 auto"><button class="secondary" id="genAgent">Generate agent</button></div>
+          </div>
+          <!-- Filled by "Generate agent". On-chain delegates are addresses, not
+               DID strings, so the sponsor flow needs the address as well as the
+               DID. Without this field the generate handler threw on assignment
+               and the button appeared to do nothing. -->
+          <div><label>Agent address (derived — on-chain delegates are addresses)</label><input id="agentAddr" placeholder="0x… filled by Generate agent" readonly /></div>
+          <div class="hint">Verify only needs the agent DID — anyone can look up its sponsor without a key or gas.</div>
+        </div>
+
+        <div class="btn-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+          <button class="ss" data-op="sponsor">Confirm sponsorship (sponsor signs)</button>
+          <button class="secondary" data-op="verifySponsor">Who sponsors this agent? (read chain)</button>
+          <button class="ss" data-op="revokeSponsor">Revoke sponsorship (sponsor signs)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="console">
+      <h2>Output <button class="secondary" id="clear" style="padding:3px 10px;font-size:11px">clear</button></h2>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

@@ -24,6 +24,11 @@ deploy-contracts/logs/
 
 # Backend runtime / local state
 eclaim-backend/claim-meta.json
+eclaim-backend/claim-numbers-index.json
+
+# IDA SDK local examples
+ida_sdk/**/node_modules/
+ida_sdk/**/dist/
 eclaim-backend/.env
 eclaim-backend/logs/
 

@@ -1,0 +1,22 @@
+{
+  "name": "sdk-playground",
+  "version": "1.0.0",
+  "description": "Visual browser playground for @myida/sdk — click to exercise DID, agent, trust, and self-sovereign on-chain operations",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174 --open",
+    "build": "vite build",
+    "preview": "vite preview --port 5174"
+  },
+  "dependencies": {
+    "@myida/sdk": "^1.5.0",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.63.3"
+  }
+}
